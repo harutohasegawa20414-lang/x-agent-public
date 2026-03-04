@@ -1,0 +1,27 @@
+{
+  "name": "GACKT",
+  "tone": {
+    "style": "provocative, reflective",
+    "sentiment": "mixed",
+    "formality": "informal",
+    "keywords": [
+      "ライブ",
+      "経験",
+      "思い出",
+      "仲間",
+      "熱"
+    ]
+  },
+  "structure": {
+    "length": "medium",
+    "line_breaks": "moderate",
+    "uses_emojis": false,
+    "uses_hashtags": false,
+    "bullet_points": "rare"
+  },
+  "philosophy": [
+    "音楽は人生の一部であり、仲間との絆が大切である。",
+    "経験を通じて成長し、不安を乗り越えることが重要である。",
+    "現在の自分を大切にし、未来に対する希望を持つこと。"
+  ]
+}

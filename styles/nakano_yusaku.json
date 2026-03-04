@@ -1,0 +1,23 @@
+{
+    "name": "中野優作 ｜CAR and LIFE.",
+    "tone": {
+        "style": "storytelling",
+        "phrases": [
+            "これマジで",
+            "結論から言うと",
+            "〜なんですよね",
+            "〜してほしい"
+        ],
+        "sentiment": "inspirational"
+    },
+    "structure": {
+        "length": "medium",
+        "line_breaks": "strategic",
+        "bullet_points": true
+    },
+    "philosophy": [
+        "growth_mindset",
+        "knowledge_sharing",
+        "business_strategy"
+    ]
+}

@@ -1,0 +1,14 @@
+{
+  "enabled": false,
+  "jobs": [
+    {
+      "id": "job_example",
+      "account_id": "default",
+      "style_id": "horiemon",
+      "topic": "投稿テーマをここに記述",
+      "cron": "0 9 * * *",
+      "enabled": false,
+      "content": ""
+    }
+  ]
+}

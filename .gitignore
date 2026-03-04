@@ -1,0 +1,82 @@
+# ============================================================
+# 機密情報・認証情報（絶対にプッシュしない）
+# ============================================================
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+*.pem
+*.key
+*.p12
+*.pfx
+service_account*.json
+
+# Claude Code ローカル設定（APIキーが含まれる場合があるため除外）
+.claude/settings.local.json
+
+# ============================================================
+# X Agent - data/ （機密・運用データのみ除外）
+# ============================================================
+# 認証情報
+data/accounts.json
+
+# 運用データ（個人情報・投稿履歴）
+data/post_history.json
+data/generated_posts.json
+data/chat_session.json
+data/source_cache.json
+data/tweet_examples_cache.json
+data/style_usernames.json
+data/schedule_config.json
+
+# ============================================================
+# No.9 - no.9/data/ （機密・運用データのみ除外）
+# ============================================================
+no.9/data/dm_history.json
+no.9/data/targets.json
+no.9/data/replies.json
+no.9/data/blacklist.json
+no.9/data/notion_cache.json
+no.9/data/poll_status.json
+
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ============================================================
+# Node.js / フロントエンド
+# ============================================================
+node_modules/
+dist/
+.npm_cache/
+npm-debug.log*
+package-lock.json
+
+# ============================================================
+# ログ
+# ============================================================
+*.log
+backend.log
+frontend.log
+no9_backend.log
+dashboard/backend.log
+
+# ============================================================
+# OS / IDE
+# ============================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,13 @@
+{
+  "current": "default",
+  "accounts": [
+    {
+      "id": "default",
+      "name": "アカウント表示名",
+      "x_api_key": "YOUR_X_API_KEY",
+      "x_api_secret": "YOUR_X_API_SECRET",
+      "x_access_token": "YOUR_X_ACCESS_TOKEN",
+      "x_access_token_secret": "YOUR_X_ACCESS_TOKEN_SECRET"
+    }
+  ]
+}

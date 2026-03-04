@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-dotenv
+openai
+tweepy
+requests
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+pydantic
+apscheduler
