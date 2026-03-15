@@ -1,1 +1,84 @@
-[]
+[
+  {
+    "id": "afde457d-b848-4b3a-bc11-62ce7ec991e5",
+    "name": "エンジニア",
+    "description": "test",
+    "enabled": true,
+    "conditions": {
+      "profile_keywords": [
+        "起業",
+        "社長"
+      ],
+      "post_keywords": [
+        "エンジニア",
+        "効率"
+      ],
+      "hashtags": [],
+      "exclude_keywords": [],
+      "follower_min": 1000,
+      "follower_max": 1000000,
+      "post_frequency_min": 0,
+      "last_post_days_max": 0,
+      "engagement_threshold": 0.0,
+      "is_verified_only": false
+    },
+    "score_weights": {
+      "profile_match": 30.0,
+      "post_match": 25.0,
+      "hashtag_match": 15.0,
+      "follower_range": 15.0,
+      "engagement": 15.0
+    },
+    "dm_template_id": null,
+    "test_mode": true,
+    "test_mode_limit": 3,
+    "test_mode_graduate_at": 10,
+    "auto_replenish": true,
+    "replenish_threshold": 5,
+    "created_at": "2026-03-15T18:47:31.535474",
+    "updated_at": "2026-03-15T18:47:31.535522",
+    "stats": {
+      "total_sent": 0,
+      "total_replied": 0,
+      "reply_rate": 0.0
+    }
+  },
+  {
+    "id": "dcc4e7fb-be7a-4dc6-a19b-13c5a3f2db84",
+    "name": "テスト",
+    "description": "テスト用カテゴリ",
+    "enabled": true,
+    "conditions": {
+      "profile_keywords": [],
+      "post_keywords": [],
+      "hashtags": [],
+      "exclude_keywords": [],
+      "follower_min": 0,
+      "follower_max": 9999999,
+      "post_frequency_min": 0,
+      "last_post_days_max": 365,
+      "engagement_threshold": 0.0,
+      "is_verified_only": false
+    },
+    "score_weights": {
+      "profile_match": 30,
+      "post_match": 25,
+      "hashtag_match": 15,
+      "follower_range": 15,
+      "engagement": 15
+    },
+    "dm_template_id": null,
+    "test_mode": true,
+    "test_mode_limit": 3,
+    "test_mode_graduate_at": 10,
+    "auto_replenish": false,
+    "replenish_threshold": 5,
+    "created_at": "2026-03-16T02:17:03.100024",
+    "updated_at": "2026-03-16T02:17:03.100040",
+    "stats": {
+      "total_sent": 1,
+      "total_replied": 1,
+      "reply_rate": 100.0
+    }
+  }
+]

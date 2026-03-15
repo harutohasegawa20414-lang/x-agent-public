@@ -6,6 +6,7 @@ DM返信リアルタイム取得・感情分類・人間引き継ぎ管理。
 
 import json
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -28,8 +29,26 @@ REPLIES_PATH = os.path.join(DATA_DIR, "replies.json")
 POLL_STATUS_PATH = os.path.join(DATA_DIR, "poll_status.json")
 DM_HISTORY_PATH = os.path.join(DATA_DIR, "dm_history.json")
 
+# Firebase共有クライアントをインポート（プロジェクトルート経由）
+_ROOT = os.path.dirname(NO9_DIR)  # Xエージェント/
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY_REPLIES = "no9_replies"
+_FS_KEY_POLL = "no9_poll_status"
+_FS_KEY_DM_HISTORY = "no9_dm_history"
+
 
 def _load_poll_status() -> Dict:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_POLL)
+        if result is not None:
+            return result
     if not os.path.exists(POLL_STATUS_PATH):
         return {"last_polled_at": None, "last_event_id": None, "total_polled": 0, "last_error": None}
     with open(POLL_STATUS_PATH, "r", encoding="utf-8") as f:
@@ -37,12 +56,18 @@ def _load_poll_status() -> Dict:
 
 
 def _save_poll_status(status: Dict):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_POLL, status)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(POLL_STATUS_PATH, "w", encoding="utf-8") as f:
         json.dump(status, f, ensure_ascii=False, indent=2)
 
 
 def _load_dm_history() -> List[Dict]:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_DM_HISTORY)
+        if result is not None:
+            return result
     if not os.path.exists(DM_HISTORY_PATH):
         return []
     with open(DM_HISTORY_PATH, "r", encoding="utf-8") as f:
@@ -50,6 +75,10 @@ def _load_dm_history() -> List[Dict]:
 
 
 def _load_replies() -> List[Dict]:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_REPLIES)
+        if result is not None:
+            return result
     if not os.path.exists(REPLIES_PATH):
         return []
     with open(REPLIES_PATH, "r", encoding="utf-8") as f:
@@ -57,6 +86,8 @@ def _load_replies() -> List[Dict]:
 
 
 def _save_replies(replies: List[Dict]):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_REPLIES, replies)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(REPLIES_PATH, "w", encoding="utf-8") as f:
         json.dump(replies, f, ensure_ascii=False, indent=2)
@@ -195,25 +226,28 @@ def add_reply(
     if dm_event_id and any(r.get("dm_event_id") == dm_event_id for r in replies):
         return None
 
-    conversation_summary = None
+    # E2E暗号化により本文取得不可 → 返信があった事実と送信元DMの情報を記録
+    dm_history = _load_dm_history()
+    sent_dm = next((h for h in dm_history if h["id"] == dm_history_id), None)
+    sent_dm_text = sent_dm["dm_text"][:100] if sent_dm and sent_dm.get("dm_text") else ""
+    conversation_summary = f"@{username} から返信あり。送信DM: {sent_dm_text}" if sent_dm_text else f"@{username} から返信あり"
+
     if is_encrypted:
         classification = {
             "sentiment": "encrypted",
             "purpose": "unknown",
             "summary": "",
-            "requires_human": False,
-            "urgency": "low",
+            "requires_human": True,
+            "urgency": "medium",
         }
-        status = "encrypted"
+        status = "pending_human"
     else:
         classification = classify_reply(reply_text, openai_api_key)
         requires_human = classification.get("requires_human", False)
         status = "pending_human" if requires_human else "auto_classified"
 
-        # 人間対応が必要な場合、送信DMを取得して会話要約を自動生成
-        if requires_human:
-            dm_history = _load_dm_history()
-            sent_dm = next((h for h in dm_history if h["id"] == dm_history_id), None)
+        # テキストが取得できた場合のみAI要約を上書き
+        if requires_human and reply_text:
             dm_text = sent_dm["dm_text"] if sent_dm else ""
             conversation_summary = _generate_conversation_summary(dm_text, reply_text, username, openai_api_key)
 
@@ -316,7 +350,12 @@ def poll_dm_replies(
     access_token_secret: str = None,
     openai_api_key: str = None,
 ) -> Dict:
-    """X API DM eventsをポーリングして新しい返信を記録する"""
+    """X API DM eventsをポーリングして新しい返信を記録する。
+
+    E2E暗号化により一般的なget_dm_eventsでは相手のメッセージが取得できないため、
+    各ターゲットごとにparticipant_id指定で1:1会話イベントを取得し、
+    自分以外のsender_idを持つイベントがあれば返信ありと判定する。
+    """
     poll_status = _load_poll_status()
 
     if not TWEEPY_AVAILABLE or not all([api_key, api_secret, access_token, access_token_secret]):
@@ -335,16 +374,9 @@ def poll_dm_replies(
             access_token_secret=access_token_secret,
         )
 
-        kwargs: Dict = {
-            "event_types": "MessageCreate",
-            "dm_event_fields": ["id", "text", "created_at", "sender_id"],
-            "max_results": 100,
-        }
-        if poll_status.get("last_event_id"):
-            kwargs["since_id"] = poll_status["last_event_id"]
-
-        response = client.get_dm_events(**kwargs)
-        events = response.data or []
+        # 自分のuser_idを取得
+        me = client.get_me()
+        my_user_id = str(me.data.id) if me and me.data else None
 
         # 送信済みDM履歴: user_id → 最初の送信履歴エントリ
         dm_history = _load_dm_history()
@@ -355,48 +387,67 @@ def poll_dm_replies(
                 sent_by_user[uid] = h
 
         new_count = 0
-        latest_event_id: Optional[str] = None
+        errors = []
 
-        for event in events:
-            sender_id = str(getattr(event, "sender_id", ""))
-            if sender_id not in sent_by_user:
-                continue  # 送信相手からの返信でない
+        # 各ターゲットごとに1:1会話のイベントを取得
+        for target_uid, hist in sent_by_user.items():
+            try:
+                response = client.get_dm_events(
+                    participant_id=target_uid,
+                    event_types="MessageCreate",
+                    dm_event_fields=["id", "text", "created_at", "sender_id"],
+                    max_results=50,
+                )
+                events = response.data or []
+                print(f"[POLL DEBUG] target={target_uid} my_id={my_user_id} events_count={len(events)}")
+                for ev in events:
+                    print(f"  event id={ev.id} sender_id={getattr(ev, 'sender_id', '?')} text={getattr(ev, 'text', '')!r}")
 
-            hist = sent_by_user[sender_id]
-            raw_text = getattr(event, "text", "") or ""
-            result = add_reply(
-                dm_history_id=hist["id"],
-                user_id=sender_id,
-                username=hist.get("username", ""),
-                reply_text=raw_text,
-                category_id=hist.get("category_id", ""),
-                target_id=hist.get("target_id", ""),
-                openai_api_key=openai_api_key,
-                dm_event_id=str(event.id),
-                is_encrypted=(raw_text == ""),
-            )
-            if result is not None:
-                new_count += 1
+                for event in events:
+                    sender_id = str(getattr(event, "sender_id", ""))
+                    # 自分が送ったメッセージはスキップ。相手からのイベントのみ記録。
+                    if my_user_id and sender_id == my_user_id:
+                        continue
+                    if not my_user_id and sender_id != target_uid:
+                        continue
 
-            eid = str(event.id)
-            if latest_event_id is None or int(eid) > int(latest_event_id):
-                latest_event_id = eid
+                    # 相手からの返信を検出
+                    result = add_reply(
+                        dm_history_id=hist["id"],
+                        user_id=sender_id,
+                        username=hist.get("username", ""),
+                        reply_text="",
+                        category_id=hist.get("category_id", ""),
+                        target_id=hist.get("target_id", ""),
+                        openai_api_key=openai_api_key,
+                        dm_event_id=str(event.id),
+                        is_encrypted=True,
+                    )
+                    if result is not None:
+                        new_count += 1
+                        print(f"[POLL] @{hist.get('username', target_uid)} から返信検出")
+
+            except Exception as e:
+                err_msg = str(e)
+                print(f"[WARN] participant poll failed for {target_uid}: {err_msg}")
+                errors.append({"user_id": target_uid, "error": err_msg})
 
         poll_status["last_polled_at"] = datetime.now().isoformat()
         poll_status["total_polled"] = poll_status.get("total_polled", 0) + 1
         poll_status["last_error"] = None
-        if latest_event_id:
-            poll_status["last_event_id"] = latest_event_id
         _save_poll_status(poll_status)
 
-        return {"new_replies": new_count, "mock": False, "polled_at": poll_status["last_polled_at"]}
+        result = {"new_replies": new_count, "mock": False, "polled_at": poll_status["last_polled_at"]}
+        if errors:
+            result["errors"] = errors
+        return result
 
     except Exception as e:
         print(f"[ERROR] DM poll failed: {e}")
         poll_status["last_polled_at"] = datetime.now().isoformat()
         poll_status["last_error"] = str(e)
         _save_poll_status(poll_status)
-        return {"new_replies": 0, "error": str(e), "polled_at": poll_status["last_polled_at"]}
+        return {"new_replies": 0, "error": "ポーリングに失敗しました。しばらく待ってから再試行してください。", "polled_at": poll_status["last_polled_at"]}
 
 
 def get_poll_status() -> Dict:

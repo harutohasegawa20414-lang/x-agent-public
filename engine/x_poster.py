@@ -4,7 +4,7 @@ import tweepy
 class XPoster:
     def __init__(self, api_key=None, api_secret=None, access_token=None, access_token_secret=None):
         """
-        Initializes the X API client using OAuth 1.0a User Context.
+        Initializes the X API client using OAuth 1.0a User Context (v2).
         外部からAPIキーを受け取れるように変更（アカウント切り替え対応）。
         引数が省略された場合は設定ファイルから読み込む。
         """
@@ -37,14 +37,26 @@ class XPoster:
 
     def post_tweet(self, text: str) -> bool:
         """
-        Posts a tweet to X.
+        Posts a tweet to X using API v2.
         """
         if not self.client:
             print(f"\n[MOCK X POST] Client not initialized. Would have posted:\n{'-'*40}\n{text}\n{'-'*40}\n")
             return False
 
         try:
-            print(f"Attempting to post to X...")
+            # 各行末の余分な空白を除去し、連続する空行を1つにまとめる
+            lines = text.splitlines()
+            cleaned_lines = [line.rstrip() for line in lines]
+            result = []
+            prev_blank = False
+            for line in cleaned_lines:
+                is_blank = (line.strip() == '')
+                if is_blank and prev_blank:
+                    continue
+                result.append(line)
+                prev_blank = is_blank
+            text = '\n'.join(result).strip()
+            print(f"Attempting to post to X (v2)... ({len(text)}文字)")
             response = self.client.create_tweet(text=text)
             print(f"Successfully posted! Tweet ID: {response.data['id']}")
             return True
@@ -56,12 +68,10 @@ class XPoster:
                 print(f"Response body: {e.response.text}")
             else:
                 print(f"Error posting to X: {e}")
-            if hasattr(e, 'api_messages') and e.api_messages:
-                print(f"API Messages: {e.api_messages}")
             if status_code == 403:
-                print("[HINT] 403: App権限がRead+Writeに設定されているか、またはトークンが重複ツイートをブロックしている可能性があります。")
+                print("[HINT] 403: App権限がRead+Writeに設定されているか確認してください。")
             elif status_code == 429:
-                print("[HINT] 429: レート制限に達しました。X APIの制限リセット後に再試行してください（Free tierは24時間に17ツイートまで）。")
+                print("[HINT] 429: レート制限に達しました。しばらく待ってから再試行してください。")
             return False
         except Exception as e:
             print(f"Unexpected error: {e}")

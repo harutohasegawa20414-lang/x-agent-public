@@ -1,0 +1,25 @@
+# systemd サービス: X-Agent バックエンド (port 5002)
+#
+# 配置:
+#   sudo cp scripts/x-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable x-agent
+#   sudo systemctl start x-agent
+
+[Unit]
+Description=X-Agent Backend (port 5002)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Xエージェント
+EnvironmentFile=/home/ubuntu/Xエージェント/.env
+ExecStart=/usr/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port 5002
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/Xエージェント/backend.log
+StandardError=append:/home/ubuntu/Xエージェント/backend.log
+
+[Install]
+WantedBy=multi-user.target

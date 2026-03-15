@@ -7,6 +7,7 @@ DM送信制御・安全管理モジュール。
 
 import json
 import os
+import sys
 import uuid
 import random
 from datetime import datetime, timedelta
@@ -23,6 +24,19 @@ DATA_DIR = os.path.join(NO9_DIR, "data")
 DM_HISTORY_PATH = os.path.join(DATA_DIR, "dm_history.json")
 SEND_CONFIG_PATH = os.path.join(DATA_DIR, "send_config.json")
 
+# Firebase共有クライアントをインポート（プロジェクトルート経由）
+_ROOT = os.path.dirname(NO9_DIR)  # Xエージェント/
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY_HISTORY = "no9_dm_history"
+_FS_KEY_CONFIG = "no9_send_config"
+
 DEFAULT_CONFIG = {
     "daily_limit": 20,
     "per_category_daily_limit": 10,
@@ -36,6 +50,10 @@ DEFAULT_CONFIG = {
 
 
 def _load_dm_history() -> List[Dict]:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_HISTORY)
+        if result is not None:
+            return result
     if not os.path.exists(DM_HISTORY_PATH):
         return []
     with open(DM_HISTORY_PATH, "r", encoding="utf-8") as f:
@@ -43,12 +61,18 @@ def _load_dm_history() -> List[Dict]:
 
 
 def _save_dm_history(history: List[Dict]):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_HISTORY, history)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(DM_HISTORY_PATH, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 
 def load_send_config() -> Dict:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_CONFIG)
+        if result is not None:
+            return {**DEFAULT_CONFIG, **result}
     if not os.path.exists(SEND_CONFIG_PATH):
         return DEFAULT_CONFIG.copy()
     with open(SEND_CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -57,6 +81,8 @@ def load_send_config() -> Dict:
 
 
 def save_send_config(config: Dict):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_CONFIG, config)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(SEND_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
@@ -280,6 +306,10 @@ def list_dm_history(
 
 def _load_replies_for_health() -> List[Dict]:
     """健全度チェック用に返信データを読み込む（循環インポート回避のためインライン定義）"""
+    if _FIREBASE_IMPORTED:
+        result = load_doc("no9_replies")
+        if result is not None:
+            return result
     replies_path = os.path.join(DATA_DIR, "replies.json")
     if not os.path.exists(replies_path):
         return []

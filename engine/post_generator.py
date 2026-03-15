@@ -98,7 +98,7 @@ class PostGenerator:
 
         except Exception as e:
             print(f"Error generating variations: {e}")
-            error_msg = f"[生成エラー] APIの制限またはサーバーエラーが発生しました。時間をおいて再試行してください。\n詳細: {str(e)}"
+            error_msg = "[生成エラー] APIの制限またはサーバーエラーが発生しました。時間をおいて再試行してください。"
             return [error_msg]
 
     def generate_post(self, system_prompt: str, user_prompt: str) -> str:

@@ -65,12 +65,14 @@ export default function AnalyticsPage() {
   const maxCatRate = Math.max(...catStats.map(c => c.reply_rate), 1)
   const maxKwRate  = Math.max(...kwStats.map(k => k.reply_rate), 1)
 
-  // 過去30日分（今日含む）のデータを構築
+  // 過去30日分（今日含む）のデータを構築（ローカル日付を使用）
+  const toLocalDate = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   const dataByDate = Object.fromEntries(daily.map(d => [d.date, d]))
   const allData = Array.from({ length: 30 }, (_, i) => {
     const d = new Date()
     d.setDate(d.getDate() - 29 + i)
-    const date = d.toISOString().slice(0, 10)
+    const date = toLocalDate(d)
     const isToday = i === 29
     return {
       date,
@@ -84,11 +86,21 @@ export default function AnalyticsPage() {
   // スライダーで指定した日数分だけ末尾から切り出す（常に今日が右端）
   const visibleData = allData.slice(30 - numDays)
 
-  // 表示日数に応じてX軸ラベルの間隔を自動調整
-  const xAxisInterval =
-    numDays <= 7  ? 0 :
-    numDays <= 14 ? 1 :
-    numDays <= 21 ? 2 : 3
+  // 表示するX軸ラベルを明示的に指定（常に「今日」を含む）
+  const tickLabels = (() => {
+    const len = visibleData.length
+    const maxTicks = len <= 7 ? len : len <= 14 ? 7 : len <= 21 ? 8 : 10
+    const step = Math.max(1, Math.ceil(len / maxTicks))
+    const labels = []
+    for (let i = 0; i < len; i += step) {
+      labels.push(visibleData[i].label)
+    }
+    const lastLabel = visibleData[len - 1].label
+    if (!labels.includes(lastLabel)) {
+      labels.push(lastLabel)
+    }
+    return labels
+  })()
 
   return (
     <div style={{ padding: '32px 36px' }}>
@@ -160,7 +172,7 @@ export default function AnalyticsPage() {
             <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
             <XAxis
               dataKey="label"
-              interval={xAxisInterval}
+              ticks={tickLabels}
               tick={({ x, y, payload }) => {
                 const isToday = payload.value === '今日'
                 return (

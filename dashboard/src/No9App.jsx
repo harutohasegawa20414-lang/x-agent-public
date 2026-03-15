@@ -66,7 +66,76 @@ function AccountSwitcher({ onEditRequest, onAddRequest }) {
   // 外部からリロードできるよう公開
   AccountSwitcher._reload = load
 
-  if (!current) return null
+  if (!current) {
+    return (
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        {accounts.length > 0 ? (
+          <>
+            <div style={{ fontSize: 10, color: '#4f6080', fontWeight: 600, letterSpacing: '0.06em', marginBottom: 6 }}>
+              アカウントを選択
+            </div>
+            {accounts.map(acc => (
+              <button
+                key={acc.id}
+                onClick={() => handleSwitch(acc.id)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+                  background: 'rgba(255,255,255,0.04)', cursor: 'pointer', color: '#aab4cc',
+                  fontSize: 12, fontWeight: 500, fontFamily: 'inherit', marginBottom: 4,
+                  textAlign: 'left',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(79,142,247,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+              >
+                <div style={{
+                  width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                  background: 'rgba(255,255,255,0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 9, fontWeight: 800, color: 'white',
+                }}>
+                  {acc.name.slice(0, 1).toUpperCase()}
+                </div>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {acc.name}
+                </span>
+              </button>
+            ))}
+            <button
+              onClick={() => onAddRequest()}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '7px 10px', borderRadius: 8, border: '1px dashed rgba(79,142,247,0.5)',
+                background: 'rgba(79,142,247,0.05)', cursor: 'pointer',
+                color: '#4f8ef7', fontSize: 12, fontFamily: 'inherit', fontWeight: 600,
+                marginTop: 4,
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(79,142,247,0.1)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(79,142,247,0.05)'}
+            >
+              <Plus size={13} />
+              新しいアカウントを追加
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => { onAddRequest() }}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '8px 10px', borderRadius: 8, border: '1px dashed rgba(79,142,247,0.5)',
+              background: 'rgba(79,142,247,0.05)', cursor: 'pointer',
+              color: '#4f8ef7', fontSize: 13, fontFamily: 'inherit', fontWeight: 600,
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(79,142,247,0.1)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(79,142,247,0.05)'}
+          >
+            <Plus size={14} />
+            アカウントを登録
+          </button>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div ref={ref} style={{ position: 'relative', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>

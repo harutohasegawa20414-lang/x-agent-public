@@ -11,6 +11,11 @@ token.json
 *.p12
 *.pfx
 service_account*.json
+firebase-service-account.json
+
+# Firebase キャッシュ・バックアップ
+.firebase/
+*.bak
 
 # Claude Code ローカル設定（APIキーが含まれる場合があるため除外）
 .claude/settings.local.json
@@ -39,6 +44,8 @@ no.9/data/replies.json
 no.9/data/blacklist.json
 no.9/data/notion_cache.json
 no.9/data/poll_status.json
+no.9/data/current_account.json
+no.9/data/send_config.json
 
 # ============================================================
 # Python

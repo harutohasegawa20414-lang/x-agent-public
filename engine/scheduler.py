@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import random
 import asyncio
 import time
@@ -20,6 +21,18 @@ CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "schedule_config.json"
 )
 
+# Firebase共有クライアントをインポート
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY = "xagent_schedule_config"
+
 COMPANY_INFO_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "color_monster.json"
 )
@@ -35,6 +48,10 @@ class AutomationScheduler:
         return cls._instance
 
     def load_config(self) -> dict:
+        if _FIREBASE_IMPORTED:
+            result = load_doc(_FS_KEY)
+            if result is not None:
+                return result
         if not os.path.exists(CONFIG_PATH):
             return {"enabled": True, "jobs": []}
         try:
@@ -44,6 +61,9 @@ class AutomationScheduler:
             return {"enabled": True, "jobs": []}
 
     def save_config(self, config: dict):
+        if _FIREBASE_IMPORTED:
+            save_doc(_FS_KEY, config)
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
 

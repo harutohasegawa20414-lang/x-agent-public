@@ -5,14 +5,31 @@ engine/frameworks_manager.py
 """
 import json
 import os
+import sys
 import time
 from typing import List, Optional
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 FRAMEWORKS_PATH = os.path.join(DATA_DIR, "frameworks.json")
 
+# Firebase共有クライアントをインポート
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY = "xagent_frameworks"
+
 
 def _load_all() -> dict:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY)
+        if result is not None:
+            return result
     if not os.path.exists(FRAMEWORKS_PATH):
         return {}
     with open(FRAMEWORKS_PATH, "r", encoding="utf-8") as f:
@@ -20,6 +37,8 @@ def _load_all() -> dict:
 
 
 def _save_all(data: dict) -> None:
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY, data)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(FRAMEWORKS_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

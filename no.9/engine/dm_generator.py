@@ -7,6 +7,7 @@ AIによるパーソナライズDM生成モジュール。
 
 import json
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -22,8 +23,25 @@ DATA_DIR = os.path.join(NO9_DIR, "data")
 TEMPLATES_PATH = os.path.join(DATA_DIR, "dm_templates.json")
 DM_HISTORY_PATH = os.path.join(DATA_DIR, "dm_history.json")
 
+# Firebase共有クライアントをインポート（プロジェクトルート経由）
+_ROOT = os.path.dirname(NO9_DIR)  # Xエージェント/
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY_TEMPLATES = "no9_dm_templates"
+_FS_KEY_DM_HISTORY = "no9_dm_history"
+
 
 def _load_templates() -> List[Dict]:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_TEMPLATES)
+        if result is not None:
+            return result
     if not os.path.exists(TEMPLATES_PATH):
         return []
     with open(TEMPLATES_PATH, "r", encoding="utf-8") as f:
@@ -31,6 +49,8 @@ def _load_templates() -> List[Dict]:
 
 
 def _save_templates(templates: List[Dict]):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_TEMPLATES, templates)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(TEMPLATES_PATH, "w", encoding="utf-8") as f:
         json.dump(templates, f, ensure_ascii=False, indent=2)
@@ -38,6 +58,11 @@ def _save_templates(templates: List[Dict]):
 
 def _get_recent_dms_for_target(target_id: str, limit: int = 5) -> List[str]:
     """同一ターゲットへの過去DM送信テキストを取得（類似度チェック用）"""
+    if _FIREBASE_IMPORTED:
+        history = load_doc(_FS_KEY_DM_HISTORY)
+        if history is not None:
+            texts = [h["dm_text"] for h in history if h.get("target_id") == target_id and h.get("dm_text")]
+            return texts[-limit:]
     if not os.path.exists(DM_HISTORY_PATH):
         return []
     with open(DM_HISTORY_PATH, "r", encoding="utf-8") as f:

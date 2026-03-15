@@ -7,7 +7,8 @@ import AccountModal from './components/AccountModal'
 import ChatPanel from './components/ChatPanel'
 import AddStyleModal from './components/AddStyleModal'
 import FrameworkExtractorPanel from './components/FrameworkExtractorPanel'
-import { fetchStyles, generatePost, postToX, fetchSourceStatus, syncSources, fetchAccounts, fetchCurrentAccount, switchAccount, addAccount, editAccount, addCustomStyle, deleteCustomStyle, fetchGeneratedPosts, fetchFrameworks, saveFrameworks, deleteFramework, extractFrameworksByUsername } from './api'
+import { fetchStyles, generatePost, postToX, fetchSourceStatus, syncSources, fetchAccounts, fetchCurrentAccount, switchAccount, addAccount, editAccount, addCustomStyle, deleteCustomStyle, fetchGeneratedPosts, fetchFrameworks, saveFrameworks, deleteFramework, extractFrameworksByUsername, fetchSourceSelections } from './api'
+import SourceSelector from './components/SourceSelector'
 import { RefreshCcw, Cpu, ShieldCheck, Zap, History, Settings2, ChevronDown, Check, Plus, Edit2 } from 'lucide-react'
 
 const NAV = [
@@ -26,7 +27,76 @@ function SidebarAccountSwitcher({ currentAccount, accounts, onSwitch, onEdit, on
         return () => document.removeEventListener('mousedown', handler)
     }, [])
 
-    if (!currentAccount) return null
+    if (!currentAccount) {
+        return (
+            <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                {(accounts && accounts.length > 0) ? (
+                    <>
+                        <div style={{ fontSize: 10, color: '#4f6080', fontWeight: 600, letterSpacing: '0.06em', marginBottom: 6 }}>
+                            アカウントを選択
+                        </div>
+                        {accounts.map(acc => (
+                            <button
+                                key={acc.id}
+                                onClick={() => onSwitch(acc.id)}
+                                style={{
+                                    width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                                    padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+                                    background: 'rgba(255,255,255,0.04)', cursor: 'pointer', color: '#aab4cc',
+                                    fontSize: 12, fontWeight: 500, fontFamily: 'inherit', marginBottom: 4,
+                                    textAlign: 'left',
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(29,155,240,0.08)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                            >
+                                <div style={{
+                                    width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                                    background: 'rgba(255,255,255,0.08)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 9, fontWeight: 800, color: 'white',
+                                }}>
+                                    {acc.name.slice(0, 1).toUpperCase()}
+                                </div>
+                                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {acc.name}
+                                </span>
+                            </button>
+                        ))}
+                        <button
+                            onClick={() => onAdd()}
+                            style={{
+                                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                padding: '7px 10px', borderRadius: 8, border: '1px dashed rgba(29,155,240,0.5)',
+                                background: 'rgba(29,155,240,0.05)', cursor: 'pointer',
+                                color: '#1d9bf0', fontSize: 12, fontFamily: 'inherit', fontWeight: 600,
+                                marginTop: 4,
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(29,155,240,0.1)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'rgba(29,155,240,0.05)'}
+                        >
+                            <Plus size={13} />
+                            新しいアカウントを追加
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        onClick={() => { onAdd() }}
+                        style={{
+                            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                            padding: '8px 10px', borderRadius: 8, border: '1px dashed rgba(29,155,240,0.5)',
+                            background: 'rgba(29,155,240,0.05)', cursor: 'pointer',
+                            color: '#1d9bf0', fontSize: 13, fontFamily: 'inherit', fontWeight: 600,
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(29,155,240,0.1)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(29,155,240,0.05)'}
+                    >
+                        <Plus size={14} />
+                        アカウントを登録
+                    </button>
+                )}
+            </div>
+        )
+    }
 
     return (
         <div ref={ref} style={{ position: 'relative', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
@@ -135,6 +205,8 @@ function XAgentApp() {
     const [scheduling, setScheduling] = useState({})
     const [syncStatus, setSyncStatus] = useState(null)
     const [syncLoading, setSyncLoading] = useState(false)
+    const [showSourceSelector, setShowSourceSelector] = useState(false)
+    const [sourceSelections, setSourceSelections] = useState({ drive: [], notion: [], urls: [] })
     const [activeTab, setActiveTab] = useState('generate')
     const [accounts, setAccounts] = useState([])
     const [currentAccount, setCurrentAccount] = useState(null)
@@ -166,6 +238,10 @@ function XAgentApp() {
                 try {
                     const statusData = await fetchSourceStatus()
                     setSyncStatus(statusData)
+                } catch (_) { }
+                try {
+                    const selData = await fetchSourceSelections()
+                    setSourceSelections(selData)
                 } catch (_) { }
                 try {
                     const accountsData = await fetchAccounts()
@@ -449,41 +525,68 @@ function XAgentApp() {
 
                             {/* ソース同期バー */}
                             <div className="sync-bar">
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-                                    <div className="sync-status-item">
-                                        <span className="sync-label">Google Drive</span>
-                                        <span className="sync-value">
-                                            <span className={`status-dot ${syncStatus?.drive?.status === 'ok' ? 'ok' : 'ng'}`} />
-                                            {syncStatus?.drive?.status === 'ok'
-                                                ? `${syncStatus?.drive?.files?.length ?? 0} 個のファイル`
-                                                : '未接続'}
-                                        </span>
-                                    </div>
-                                    <div style={{ width: '1px', height: '28px', background: 'rgba(96,165,250,0.12)' }} />
-                                    <div className="sync-status-item">
-                                        <span className="sync-label">Notion</span>
-                                        <span className="sync-value">
-                                            <span className={`status-dot ${syncStatus?.notion?.status === 'ok' ? 'ok' : 'ng'}`} />
-                                            {syncStatus?.notion?.status === 'ok'
-                                                ? `${syncStatus.notion.pages?.length || 0} ページ / ${syncStatus.notion.db_entries_count || 0} レコード`
-                                                : '未接続'}
-                                        </span>
-                                    </div>
-                                    <div style={{ width: '1px', height: '28px', background: 'rgba(96,165,250,0.12)' }} />
-                                    <div className="sync-status-item">
-                                        <span className="sync-label">Last Sync</span>
-                                        <span className="sync-value" style={{ color: '#475569' }}>
-                                            {syncStatus?.last_updated
-                                                ? new Date(syncStatus.last_updated).toLocaleString()
-                                                : '---'}
-                                        </span>
-                                    </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+                                    <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.03em', flexShrink: 0 }}>ソース:</span>
+                                    {(() => {
+                                        const tags = []
+                                        if (sourceSelections.drive?.length > 0) {
+                                            tags.push({ label: `Google Drive (${sourceSelections.drive.length}件)`, color: '#34d399', bg: 'rgba(52,211,153,0.1)' })
+                                        }
+                                        if (sourceSelections.notion?.length > 0) {
+                                            tags.push({ label: `Notion (${sourceSelections.notion.length}件)`, color: '#a78bfa', bg: 'rgba(167,139,250,0.1)' })
+                                        }
+                                        if (sourceSelections.urls?.length > 0) {
+                                            sourceSelections.urls.forEach(u => {
+                                                tags.push({
+                                                    label: u.title || 'URL',
+                                                    color: u.type === 'gdrive' ? '#34d399' : '#a855f7',
+                                                    bg: u.type === 'gdrive' ? 'rgba(52,211,153,0.1)' : 'rgba(168,85,247,0.1)',
+                                                    icon: u.type === 'gdrive' ? 'G' : 'N',
+                                                })
+                                            })
+                                        }
+                                        if (tags.length === 0) {
+                                            return <span style={{ color: '#475569', fontSize: '0.8rem' }}>未選択</span>
+                                        }
+                                        return tags.map((tag, i) => (
+                                            <span key={i} style={{
+                                                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                                                padding: '0.2rem 0.6rem', borderRadius: '6px',
+                                                background: tag.bg, border: `1px solid ${tag.color}33`,
+                                                color: tag.color, fontSize: '0.75rem', fontWeight: 600,
+                                            }}>
+                                                {tag.icon && <span style={{ fontSize: '0.65rem', fontWeight: 800 }}>{tag.icon}</span>}
+                                                {tag.label}
+                                            </span>
+                                        ))
+                                    })()}
                                 </div>
-                                <button onClick={handleSync} disabled={syncLoading} className="sync-btn">
-                                    <RefreshCcw style={{ width: '14px', height: '14px' }} className={syncLoading ? 'animate-spin' : ''} />
-                                    <span>一次情報を同期</span>
-                                </button>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                        onClick={() => setShowSourceSelector(true)}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                            padding: '0.45rem 0.9rem', borderRadius: '8px',
+                                            background: 'rgba(96,165,250,0.08)',
+                                            border: '1px solid rgba(96,165,250,0.2)',
+                                            color: '#93c5fd', cursor: 'pointer',
+                                            fontSize: '0.8rem', fontWeight: 600,
+                                        }}
+                                    >
+                                        ソースを選択
+                                    </button>
+                                    <button onClick={handleSync} disabled={syncLoading} className="sync-btn">
+                                        <RefreshCcw style={{ width: '14px', height: '14px' }} className={syncLoading ? 'animate-spin' : ''} />
+                                        <span>同期</span>
+                                    </button>
+                                </div>
                             </div>
+                            {showSourceSelector && (
+                                <SourceSelector
+                                    onClose={() => setShowSourceSelector(false)}
+                                    onSaved={(sel) => setSourceSelections(sel)}
+                                />
+                            )}
 
                             {/* 2カラムレイアウト: 左=スタイルカード / 右=AIチャット */}
                             <div className="main-split">

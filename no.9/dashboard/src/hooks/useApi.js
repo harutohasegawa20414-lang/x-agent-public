@@ -32,6 +32,7 @@ export const api = {
   updateTargetStatus: (id, data) => apiFetch(`/targets/${id}/status`, { method: 'PUT', body: JSON.stringify(data) }),
   updateDealResult: (id, deal_result) => apiFetch(`/targets/${id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'converted', deal_result }) }),
   addBlacklist: (data) => apiFetch('/targets/blacklist', { method: 'POST', body: JSON.stringify(data) }),
+  markReplied: (id) => apiFetch(`/targets/${id}/mark-replied`, { method: 'POST' }),
   getReplenishStatus: () => apiFetch('/targets/replenish-status'),
   triggerReplenish: (id) => apiFetch(`/categories/${id}/replenish`, { method: 'POST' }),
 

@@ -1,0 +1,25 @@
+# systemd サービス: No.9 バックエンド (port 5003)
+#
+# 配置:
+#   sudo cp scripts/no9.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable no9
+#   sudo systemctl start no9
+
+[Unit]
+Description=No.9 Backend (port 5003)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Xエージェント/no.9
+EnvironmentFile=/home/ubuntu/Xエージェント/.env
+ExecStart=/usr/bin/python3 -m uvicorn api.main:app --host 0.0.0.0 --port 5003
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/ubuntu/Xエージェント/no9-backend.log
+StandardError=append:/home/ubuntu/Xエージェント/no9-backend.log
+
+[Install]
+WantedBy=multi-user.target

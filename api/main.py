@@ -6,8 +6,9 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import json
 import asyncio
 import random
@@ -15,6 +16,14 @@ import time
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from typing import List, Optional
+
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    _SLOWAPI_AVAILABLE = True
+except ImportError:
+    _SLOWAPI_AVAILABLE = False
 
 # プロジェクトのルートディレクトリを探索パスに追加
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +37,7 @@ from engine.post_generator import PostGenerator
 from engine.x_poster import XPoster
 from engine.history_manager import load_history, save_post, delete_post, update_post_status
 from engine import account_manager
-from engine.source_fetcher import SourceAggregator
+from engine.source_fetcher import SourceAggregator, GoogleDriveFetcher, NotionFetcher, load_selections, save_selections, parse_google_drive_url, parse_notion_url
 from engine.chat_agent import ChatAgent
 from engine.scheduler import scheduler_instance
 from engine.tweet_fetcher import fetch_recent_tweets, TweetFetchAuthError
@@ -57,14 +66,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="X Automation API", lifespan=lifespan)
 
-# Enable CORS for frontend development
+# レート制限（slowapi）
+if _SLOWAPI_AVAILABLE:
+    _limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+    app.state.limiter = _limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS: 環境変数 ALLOWED_ORIGINS でカンマ区切りに指定。未設定時はローカル開発用のみ許可
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5001,http://localhost:5002")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Api-Key"],
 )
+
+# API認証: API_SECRET_KEY が設定されている場合、X-Api-Key ヘッダーで検証する
+_API_SECRET_KEY = os.getenv("API_SECRET_KEY", "").strip()
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if _API_SECRET_KEY:
+        api_key = request.headers.get("x-api-key")
+        if api_key != _API_SECRET_KEY:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
 
 def load_company_info():
     return COMPANY_INFO
@@ -465,7 +493,7 @@ async def get_accounts():
 async def get_current_account():
     current = account_manager.get_current_account()
     if not current:
-        raise HTTPException(status_code=404, detail="No accounts configured")
+        return None
     return {"id": current["id"], "name": current["name"]}
 
 @app.post("/api/accounts/switch")
@@ -478,15 +506,18 @@ async def switch_account(request: SwitchAccountRequest):
 
 @app.post("/api/accounts")
 async def add_account(request: AddAccountRequest):
-    result = account_manager.add_account(
-        account_id=request.id,
-        name=request.name,
-        x_api_key=request.x_api_key,
-        x_api_secret=request.x_api_secret,
-        x_access_token=request.x_access_token,
-        x_access_token_secret=request.x_access_token_secret,
-    )
-    return result
+    try:
+        result = account_manager.add_account(
+            account_id=request.id,
+            name=request.name,
+            x_api_key=request.x_api_key,
+            x_api_secret=request.x_api_secret,
+            x_access_token=request.x_access_token,
+            x_access_token_secret=request.x_access_token_secret,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 @app.put("/api/accounts/{account_id}")
 async def edit_account(account_id: str, request: EditAccountRequest):
@@ -529,14 +560,11 @@ CHAT_SESSION_PATH = os.path.join(DATA_DIR, "chat_session.json")
 @app.post("/api/chat/message")
 async def chat_message(request: ChatMessageRequest):
     """AIとのチャットメッセージを処理して応答を返す"""
-    aggregator = SourceAggregator()
-    source_text = aggregator.get_combined_text()
-
     agent = ChatAgent()
     result = agent.extract_info(
         user_message=request.message,
         chat_history=request.history,
-        source_text=source_text,
+        source_text="",
     )
     return result
 
@@ -577,7 +605,57 @@ async def sync_sources():
         result = aggregator.refresh()
         return {"status": "success", "data": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+        print(f"[sync_sources] エラー: {e}")
+        raise HTTPException(status_code=500, detail="Sync failed. Please try again later.")
+
+@app.get("/api/sources/drive/files")
+async def list_drive_files():
+    files = GoogleDriveFetcher().list_files()
+    return {"files": files}
+
+@app.get("/api/sources/notion/entries")
+async def list_notion_entries():
+    entries = NotionFetcher().list_entries()
+    return {"entries": entries}
+
+@app.get("/api/sources/selections")
+async def get_selections():
+    return load_selections()
+
+class SelectionsRequest(BaseModel):
+    drive: List[str] = []
+    notion: List[str] = []
+    urls: List[dict] = []
+
+@app.post("/api/sources/selections")
+async def update_selections(req: SelectionsRequest):
+    save_selections({"drive": req.drive, "notion": req.notion, "urls": req.urls})
+    return {"status": "ok"}
+
+class URLFetchRequest(BaseModel):
+    url: str
+
+@app.post("/api/sources/url/fetch")
+async def fetch_url_source(req: URLFetchRequest):
+    url = req.url.strip()
+    if "drive.google.com" in url or "docs.google.com" in url:
+        file_id = parse_google_drive_url(url)
+        if not file_id:
+            raise HTTPException(400, "Google Drive URLからファイルIDを取得できませんでした")
+        result = GoogleDriveFetcher().fetch_file_by_id(file_id)
+        result["url"] = url
+        result["type"] = "gdrive"
+        return result
+    elif "notion.so" in url or "notion.site" in url:
+        page_id = parse_notion_url(url)
+        if not page_id:
+            raise HTTPException(400, "Notion URLからページIDを取得できませんでした")
+        result = NotionFetcher().fetch_page_by_id(page_id)
+        result["url"] = url
+        result["type"] = "notion"
+        return result
+    else:
+        raise HTTPException(400, "Google DriveまたはNotionのURLを入力してください")
 
 # ─── スケジューラー ─────────────────────────────────────────
 

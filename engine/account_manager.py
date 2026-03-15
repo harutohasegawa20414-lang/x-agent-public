@@ -1,9 +1,22 @@
 import json
 import os
+import sys
 
 ACCOUNTS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "accounts.json"
 )
+
+# Firebase共有クライアントをインポート
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY = "xagent_accounts"
 
 
 def _default_data() -> dict:
@@ -26,6 +39,10 @@ def _default_data() -> dict:
 
 def load_data() -> dict:
     """アカウントデータを読み込む。なければデフォルトを作成して返す。"""
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY)
+        if result is not None:
+            return result
     if not os.path.exists(ACCOUNTS_PATH):
         data = _default_data()
         save_data(data)
@@ -38,6 +55,8 @@ def load_data() -> dict:
 
 
 def save_data(data: dict):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY, data)
     os.makedirs(os.path.dirname(ACCOUNTS_PATH), exist_ok=True)
     with open(ACCOUNTS_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -82,8 +101,23 @@ def switch_account(account_id: str) -> bool:
 
 def add_account(account_id: str, name: str, x_api_key: str, x_api_secret: str,
                 x_access_token: str, x_access_token_secret: str) -> dict:
-    """新しいアカウントを追加する"""
+    """新しいアカウントを追加する。同じIDが既に存在する場合は情報を更新して返す。"""
     data = load_data()
+    # 既存IDの場合は情報を更新して返す（X-AgentとNo.9で同じアカウントを登録可能にする）
+    for account in data.get("accounts", []):
+        if account["id"] == account_id:
+            account["name"] = name
+            if (x_api_key or "").strip():
+                account["x_api_key"] = x_api_key.strip()
+            if (x_api_secret or "").strip():
+                account["x_api_secret"] = x_api_secret.strip()
+            if (x_access_token or "").strip():
+                account["x_access_token"] = x_access_token.strip()
+            if (x_access_token_secret or "").strip():
+                account["x_access_token_secret"] = x_access_token_secret.strip()
+            save_data(data)
+            is_current = data.get("current") == account_id
+            return {"id": account_id, "name": name, "is_current": is_current}
     new_account = {
         "id": account_id,
         "name": name,
@@ -93,9 +127,12 @@ def add_account(account_id: str, name: str, x_api_key: str, x_api_secret: str,
         "x_access_token_secret": x_access_token_secret,
     }
     data["accounts"].append(new_account)
+    # 初回アカウント or current が未設定なら自動で current に設定
+    if not data.get("current"):
+        data["current"] = account_id
+    is_current = data["current"] == account_id
     save_data(data)
-    return {"id": account_id, "name": name, "is_current": False}
-
+    return {"id": account_id, "name": name, "is_current": is_current}
 
 
 def edit_account(account_id: str, name: str, x_api_key: str, x_api_secret: str,

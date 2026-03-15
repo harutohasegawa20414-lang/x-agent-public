@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
@@ -10,6 +11,20 @@ CUSTOM_STYLES_PATH = os.path.join(
 STYLE_USERNAMES_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "style_usernames.json"
 )
+
+# Firebase共有クライアントをインポート
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY_STYLES = "xagent_custom_styles"
+_FS_KEY_USERNAMES = "xagent_style_usernames"
+
 
 @dataclass
 class StyleProfile:
@@ -22,6 +37,10 @@ class StyleProfile:
 
 def load_custom_styles() -> list:
     """data/custom_styles.json からカスタムスタイル一覧を読み込む"""
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_STYLES)
+        if result is not None:
+            return result
     if not os.path.exists(CUSTOM_STYLES_PATH):
         return []
     try:
@@ -33,6 +52,8 @@ def load_custom_styles() -> list:
 
 def save_custom_styles(styles: list):
     """カスタムスタイル一覧を data/custom_styles.json に保存する"""
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_STYLES, styles)
     os.makedirs(os.path.dirname(CUSTOM_STYLES_PATH), exist_ok=True)
     with open(CUSTOM_STYLES_PATH, "w", encoding="utf-8") as f:
         json.dump(styles, f, ensure_ascii=False, indent=2)
@@ -40,6 +61,10 @@ def save_custom_styles(styles: list):
 
 def load_style_usernames() -> dict:
     """data/style_usernames.json から全スタイルの x_username マップを読み込む"""
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY_USERNAMES)
+        if result is not None:
+            return result
     if not os.path.exists(STYLE_USERNAMES_PATH):
         return {}
     try:
@@ -56,6 +81,8 @@ def save_style_username(style_id: str, x_username: str):
         usernames[style_id] = x_username.strip().lstrip("@")
     else:
         usernames.pop(style_id, None)
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY_USERNAMES, usernames)
     os.makedirs(os.path.dirname(STYLE_USERNAMES_PATH), exist_ok=True)
     with open(STYLE_USERNAMES_PATH, "w", encoding="utf-8") as f:
         json.dump(usernames, f, ensure_ascii=False, indent=2)

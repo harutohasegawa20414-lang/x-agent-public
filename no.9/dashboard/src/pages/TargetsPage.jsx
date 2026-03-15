@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Search, Users, Star, Ban, ExternalLink, RefreshCw, ChevronDown } from 'lucide-react'
+import { Search, Users, Star, Ban, ExternalLink, RefreshCw, ChevronDown, MessageCircle } from 'lucide-react'
 import { api } from '../hooks/useApi.js'
 
 const STATUS_CONFIG = {
@@ -66,6 +66,16 @@ export default function TargetsPage() {
     if (!confirm(`@${target.username} をブラックリストに追加しますか？`)) return
     await api.addBlacklist({ user_id: target.user_id, username: target.username, reason: 'ダッシュボードから追加' })
     loadData()
+  }
+
+  const handleMarkReplied = async (target) => {
+    if (!confirm(`@${target.username} から返信がありましたか？`)) return
+    try {
+      await api.markReplied(target.id)
+      setMsg(`@${target.username} を「返信あり」に更新しました`)
+      await loadData()
+    } catch (e) { setMsg('エラー: ' + e.message) }
+    setTimeout(() => setMsg(null), 3000)
   }
 
   const handleDealResult = async (target, deal_result) => {
@@ -233,6 +243,16 @@ export default function TargetsPage() {
                     <Star size={12} style={{ color: '#f59e0b' }} />
                     <span style={{ fontWeight: 700, color: 'white', fontSize: 14 }}>{t.score}</span>
                   </div>
+                  {t.status === 'dm_sent' && (
+                    <button onClick={() => handleMarkReplied(t)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                        background: 'rgba(34,197,94,0.1)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)',
+                      }}>
+                      <MessageCircle size={11} />返信あり
+                    </button>
+                  )}
                   <a href={t.profile_url || `https://x.com/${t.username}`} target="_blank" rel="noopener noreferrer"
                     className="btn-ghost" style={{ padding: '5px 10px', borderRadius: 7, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
                     <ExternalLink size={11} />リンクに飛ぶ

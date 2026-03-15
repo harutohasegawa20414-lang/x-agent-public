@@ -13,7 +13,26 @@ from datetime import datetime
 # ── パス設定 ──────────────────────────────────────────────────
 _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 CACHE_PATH = os.path.join(_DATA_DIR, "source_cache.json")
+SELECTIONS_PATH = os.path.join(_DATA_DIR, "source_selections.json")
 CACHE_TTL_SECONDS = 3600  # 1時間
+
+
+# ── 選択状態の管理 ────────────────────────────────────────────
+
+def load_selections() -> dict:
+    if not os.path.exists(SELECTIONS_PATH):
+        return {"drive": [], "notion": [], "urls": []}
+    data = {}
+    with open(SELECTIONS_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.setdefault("urls", [])
+    return data
+
+
+def save_selections(selections: dict):
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    with open(SELECTIONS_PATH, "w", encoding="utf-8") as f:
+        json.dump(selections, f, ensure_ascii=False, indent=2)
 
 
 # ── キャッシュ操作 ────────────────────────────────────────────
@@ -36,6 +55,27 @@ def _is_cache_valid(cache: dict) -> bool:
     if not ts:
         return False
     return (time.time() - ts) < CACHE_TTL_SECONDS
+
+
+# ── URL 解析ユーティリティ ────────────────────────────────────
+
+def parse_google_drive_url(url: str) -> str | None:
+    """Google Drive URL から FILE_ID を抽出"""
+    import re
+    m = re.search(r'/d/([a-zA-Z0-9_-]{25,})', url)
+    return m.group(1) if m else None
+
+
+def parse_notion_url(url: str) -> str | None:
+    """Notion URL からページ ID を抽出"""
+    import re
+    # ハイフン付きUUID形式
+    m = re.search(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', url)
+    if m:
+        return m.group(1)
+    # ハイフンなし32文字形式（URLの末尾）
+    m = re.search(r'([a-f0-9]{32})(?:[?#].*)?$', url)
+    return m.group(1) if m else None
 
 
 # ── Google Drive フェッチャー ─────────────────────────────────
@@ -76,6 +116,58 @@ class GoogleDriveFetcher:
                 print(f"[GoogleDrive] サービスアカウント初期化エラー: {e2}")
                 return None
 
+    def list_files(self) -> list:
+        """フォルダ内のファイル一覧をID付きで返す"""
+        folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "")
+        if not folder_id:
+            return []
+        service = self._get_service()
+        if not service:
+            return []
+        try:
+            result = service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                fields="files(id, name, mimeType)",
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
+            ).execute()
+            files = result.get("files", [])
+            return [
+                {
+                    "id": f["id"],
+                    "name": f["name"],
+                    "type": "document" if f["mimeType"] == "application/vnd.google-apps.document" else "spreadsheet",
+                }
+                for f in files
+                if f["mimeType"] in (
+                    "application/vnd.google-apps.document",
+                    "application/vnd.google-apps.spreadsheet",
+                )
+            ]
+        except Exception as e:
+            print(f"[GoogleDrive] ファイル一覧取得エラー: {e}")
+            return []
+
+    def fetch_file_by_id(self, file_id: str) -> dict:
+        """個別ファイルIDからコンテンツを取得"""
+        service = self._get_service()
+        if not service:
+            return {"status": "auth_error", "title": "", "text": ""}
+        try:
+            meta = service.files().get(fileId=file_id, fields="name,mimeType").execute()
+            name = meta.get("name", "ドキュメント")
+            mime = meta.get("mimeType", "")
+            if mime == "application/vnd.google-apps.document":
+                content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+            elif mime == "application/vnd.google-apps.spreadsheet":
+                content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
+            else:
+                return {"status": "unsupported", "title": name, "text": ""}
+            text = content.decode("utf-8") if isinstance(content, bytes) else content
+            return {"status": "ok", "title": name, "text": text}
+        except Exception as e:
+            return {"status": "error", "title": "", "text": "", "error": str(e)}
+
     def fetch(self) -> dict:
         """フォルダ内のドキュメントを取得してテキストに変換"""
         folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "")
@@ -89,7 +181,9 @@ class GoogleDriveFetcher:
         try:
             query = f"'{folder_id}' in parents and trashed=false"
             files_result = service.files().list(
-                q=query, fields="files(id, name, mimeType)"
+                q=query, fields="files(id, name, mimeType)",
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
             ).execute()
             files = files_result.get("files", [])
 
@@ -210,6 +304,96 @@ class NotionFetcher:
                 if t:
                     return t
         return "（名前なし）"
+
+    def fetch_page_by_id(self, page_id: str) -> dict:
+        """個別ページまたはデータベースIDからコンテンツを取得"""
+        client = self._get_client()
+        if not client:
+            return {"status": "auth_error", "title": "", "text": ""}
+        # まずページとして取得を試みる
+        try:
+            page = client.pages.retrieve(page_id=page_id)
+            title = self._get_page_title(page)
+            blocks = client.blocks.children.list(block_id=page_id).get("results", [])
+            text = self._extract_text_from_blocks(blocks)
+            if not text:
+                text = self._extract_text_from_properties(page.get("properties", {}))
+            return {"status": "ok", "title": title, "text": text}
+        except Exception as page_err:
+            # ページ取得失敗 → データベースとして取得を試みる
+            if "not a page" not in str(page_err) and "database" not in str(page_err).lower():
+                return {"status": "error", "title": "", "text": "", "error": str(page_err)}
+        try:
+            return self._fetch_database_by_id(client, page_id)
+        except Exception as db_err:
+            return {"status": "error", "title": "", "text": "", "error": str(db_err)}
+
+    def _fetch_database_by_id(self, client, database_id: str) -> dict:
+        """データベースIDから全エントリのコンテンツを取得"""
+        import requests as _req
+        token = os.environ.get("NOTION_API_TOKEN", "")
+        # DB タイトル取得
+        try:
+            db_obj = client.databases.retrieve(database_id=database_id)
+            title_arr = db_obj.get("title", [])
+            db_title = "".join(t.get("plain_text", "") for t in title_arr) or "Notion Database"
+        except Exception:
+            db_title = "Notion Database"
+        # エントリ取得
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json",
+        }
+        r = _req.post(
+            f"https://api.notion.com/v1/databases/{database_id}/query",
+            headers=headers, json={},
+        )
+        results = r.json().get("results", [])
+        entry_texts = []
+        for entry in results:
+            if entry.get("object") != "page":
+                continue
+            name = self._get_entry_name(entry)
+            pid = entry.get("id", "")
+            try:
+                blocks_resp = client.blocks.children.list(block_id=pid)
+                text = self._extract_text_from_blocks(blocks_resp.get("results", []))
+            except Exception:
+                text = self._extract_text_from_properties(entry.get("properties", {}))
+            if text:
+                entry_texts.append(f"### {name}\n{text}")
+        return {
+            "status": "ok",
+            "title": db_title,
+            "text": "\n\n".join(entry_texts),
+        }
+
+    def list_entries(self) -> list:
+        """データベースのエントリ一覧をID付きで返す"""
+        client = self._get_client()
+        if not client or not self.database_id:
+            return []
+        try:
+            import requests as _req
+            token = os.environ.get("NOTION_API_TOKEN", "")
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json",
+            }
+            r = _req.post(
+                f"https://api.notion.com/v1/databases/{self.database_id}/query",
+                headers=headers, json={},
+            )
+            results = r.json().get("results", [])
+            return [
+                {"id": e["id"], "name": self._get_entry_name(e)}
+                for e in results if e.get("object") == "page"
+            ]
+        except Exception as e:
+            print(f"[Notion] エントリ一覧取得エラー: {e}")
+            return []
 
     def fetch(self) -> dict:
         """指定ページとデータベースからコンテンツを取得"""
@@ -358,9 +542,77 @@ class SourceAggregator:
         return data
 
     def get_combined_text(self) -> str:
-        """キャッシュから全件の combined_text を返す"""
+        """選択されたファイル・エントリのテキストのみ返す（未選択時は全件）"""
         cache = _load_cache()
-        return cache.get("combined_text", "")
+        selections = load_selections()
+        selected_drive = selections.get("drive", [])
+        selected_notion = selections.get("notion", [])
+        selected_urls = selections.get("urls", [])
+
+        # 選択なし → ソースを使わない
+        if not selected_drive and not selected_notion and not selected_urls:
+            return ""
+
+        parts = []
+
+        # Drive: 選択ファイルのみ再取得
+        if selected_drive:
+            fetcher = GoogleDriveFetcher()
+            service = fetcher._get_service()
+            if service:
+                texts = []
+                for file_id in selected_drive:
+                    try:
+                        meta = service.files().get(fileId=file_id, fields="name,mimeType").execute()
+                        mime = meta.get("mimeType", "")
+                        name = meta.get("name", "")
+                        if mime == "application/vnd.google-apps.document":
+                            content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+                            text = content.decode("utf-8") if isinstance(content, bytes) else content
+                            texts.append(f"## {name}\n{text}")
+                        elif mime == "application/vnd.google-apps.spreadsheet":
+                            content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
+                            text = content.decode("utf-8") if isinstance(content, bytes) else content
+                            texts.append(f"## {name} (表形式)\n{text}")
+                    except Exception as e:
+                        print(f"[GoogleDrive] 選択ファイル取得エラー ({file_id}): {e}")
+                if texts:
+                    parts.append("### ▼ Google Drive から取得した情報\n" + "\n\n".join(texts))
+
+        # Notion: 選択エントリのみ
+        if selected_notion:
+            notion_cache_entries = cache.get("notion", {}).get("entries", [])
+            # IDをキーにしたマップが必要なため再取得
+            fetcher = NotionFetcher()
+            client = fetcher._get_client()
+            if client:
+                texts = []
+                for entry_id in selected_notion:
+                    try:
+                        page = client.pages.retrieve(page_id=entry_id)
+                        name = fetcher._get_entry_name(page)
+                        blocks_resp = client.blocks.children.list(block_id=entry_id)
+                        text = fetcher._extract_text_from_blocks(blocks_resp.get("results", []))
+                        if not text:
+                            text = fetcher._extract_text_from_properties(page.get("properties", {}))
+                        texts.append(f"### {name}\n{text}")
+                    except Exception as e:
+                        print(f"[Notion] 選択エントリ取得エラー ({entry_id}): {e}")
+                if texts:
+                    parts.append("### ▼ Notion から取得した情報\n" + "\n\n".join(texts))
+
+        # URL ソース
+        if selected_urls:
+            url_texts = []
+            for entry in selected_urls:
+                title = entry.get("title", "URL")
+                text = entry.get("text", "")
+                if text:
+                    url_texts.append(f"## {title}\n{text}")
+            if url_texts:
+                parts.append("### ▼ URL から取得した情報\n" + "\n\n".join(url_texts))
+
+        return "\n\n".join(parts)
 
     def get_status(self) -> dict:
         """接続状況と最終更新時刻を返す"""

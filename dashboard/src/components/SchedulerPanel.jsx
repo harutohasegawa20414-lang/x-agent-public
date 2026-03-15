@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { fetchSchedulerStatus, fetchSchedulerConfig, runSchedulerJobNow, updateSchedulerConfig, refreshScheduler, fetchStyles, fetchGeneratedPosts } from '../api'
-import { Play, Clock, CheckCircle2, RefreshCcw, Loader2, Save, FileText, Calendar, Sparkles, X } from 'lucide-react'
+import { Play, Clock, CheckCircle2, RefreshCcw, Loader2, Save, FileText, Calendar, Sparkles, X, Twitter } from 'lucide-react'
 import IosTimePicker from './IosTimePicker'
 import IosDatePicker from './IosDatePicker'
 
@@ -406,8 +406,8 @@ function SchedulerPanel() {
                                         gap: '0.3rem',
                                     }}
                                 >
-                                    {runningJob === job.id ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                                    テスト生成
+                                    {runningJob === job.id ? <Loader2 size={14} className="animate-spin" /> : <Twitter size={14} />}
+                                    今すぐ投稿
                                 </button>
 
                                 <button

@@ -6,6 +6,7 @@ data/generated_posts.json に保存し、スケジューラーと共有する。
 """
 import json
 import os
+import sys
 from datetime import datetime
 from typing import List, Optional
 
@@ -13,12 +14,28 @@ GENERATED_POSTS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "generated_posts.json"
 )
 
+# Firebase共有クライアントをインポート
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY = "xagent_generated_posts"
+
 
 def load_generated_posts() -> dict:
     """
     生成済み投稿を全件読み込む。
     Returns: { style_id: { style_id, style_name, content, contents, topic, generated_at } }
     """
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY)
+        if result is not None:
+            return result
     if not os.path.exists(GENERATED_POSTS_PATH):
         return {}
     try:
@@ -26,6 +43,14 @@ def load_generated_posts() -> dict:
             return json.load(f)
     except Exception:
         return {}
+
+
+def _write_posts(posts: dict):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY, posts)
+    os.makedirs(os.path.dirname(GENERATED_POSTS_PATH), exist_ok=True)
+    with open(GENERATED_POSTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(posts, f, ensure_ascii=False, indent=2)
 
 
 def save_generated_post(
@@ -49,9 +74,7 @@ def save_generated_post(
         "topic": topic,
         "generated_at": datetime.now().isoformat(),
     }
-    os.makedirs(os.path.dirname(GENERATED_POSTS_PATH), exist_ok=True)
-    with open(GENERATED_POSTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(posts, f, ensure_ascii=False, indent=2)
+    _write_posts(posts)
 
 
 def delete_generated_post(style_id: str):
@@ -59,8 +82,7 @@ def delete_generated_post(style_id: str):
     posts = load_generated_posts()
     if style_id in posts:
         del posts[style_id]
-        with open(GENERATED_POSTS_PATH, "w", encoding="utf-8") as f:
-            json.dump(posts, f, ensure_ascii=False, indent=2)
+        _write_posts(posts)
 
 
 def pop_first_variation(style_id: str) -> bool:
@@ -83,8 +105,7 @@ def pop_first_variation(style_id: str) -> bool:
     if not contents:
         # contents がない場合は旧フォーマット: content を1件として扱い削除
         del posts[style_id]
-        with open(GENERATED_POSTS_PATH, "w", encoding="utf-8") as f:
-            json.dump(posts, f, ensure_ascii=False, indent=2)
+        _write_posts(posts)
         return True
 
     # 先頭を消費
@@ -100,7 +121,5 @@ def pop_first_variation(style_id: str) -> bool:
         entry["content"] = contents[0]
         posts[style_id] = entry
 
-    with open(GENERATED_POSTS_PATH, "w", encoding="utf-8") as f:
-        json.dump(posts, f, ensure_ascii=False, indent=2)
-
+    _write_posts(posts)
     return True

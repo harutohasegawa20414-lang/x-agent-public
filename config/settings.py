@@ -19,5 +19,7 @@ class Settings:
     NOTION_API_TOKEN = os.getenv("NOTION_API_TOKEN")
     NOTION_PAGE_IDS = os.getenv("NOTION_PAGE_IDS")  # カンマ区切り
     NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+    # Firebase / Firestore
+    FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON")
 
 settings = Settings()

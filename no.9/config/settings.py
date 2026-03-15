@@ -45,6 +45,9 @@ class Settings:
     # LINE Notify
     LINE_NOTIFY_TOKEN = os.getenv("LINE_NOTIFY_TOKEN")
 
+    # Firebase / Firestore
+    FIREBASE_CREDENTIALS_JSON = os.getenv("FIREBASE_CREDENTIALS_JSON")
+
     # No.9 固有設定
     NO9_DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
     NO9_API_PORT = int(os.getenv("NO9_API_PORT", "8001"))

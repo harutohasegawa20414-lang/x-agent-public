@@ -1,0 +1,30 @@
+{
+  "hosting": {
+    "public": "dashboard/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "x-agent-api",
+          "region": "asia-northeast1"
+        }
+      },
+      {
+        "source": "/no9-api/**",
+        "run": {
+          "serviceId": "no9-api",
+          "region": "asia-northeast1"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

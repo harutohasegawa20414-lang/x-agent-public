@@ -21,9 +21,7 @@ Write as '{style.name}', a Japanese professional.
 3. **Do NOT start with "Here is a post..." or similar meta-text.** Just output the post content directly.
 4. **Keep it within 140-200 characters**, prioritizing quality and impact.
 5. **Write in Japanese.**
-6. **RECOMMENDED: Include the company name following these rules:**
-   - Preferred form is「株式会社からもん」(full name). Every 3rd post, abbreviating to「弊社」or「からもん」is acceptable.
-   - Avoid promotional phrases like「〜を販売中」「〜が最高」. Express as a personal insight or real experience instead.
+6. **Do NOT include any specific company names in the post.**
    - Use at most 1 hashtag per post, and vary it each time (never repeat the same hashtag consecutively).
 
 ## X投稿フォーマット厳守
@@ -55,9 +53,7 @@ Your goal is to adopt the persona of '{style.name}' and write a post that perfec
 4. Do NOT start with "Here is a post..." or similar meta-text. Just output the post content directly.
 5. Keep it within 140-200 characters unless specified otherwise, but prioritize quality and impact.
 6. Write in Japanese unless the persona commonly uses English.
-7. RECOMMENDED: Include the company name following these rules:
-   - Preferred form is「株式会社からもん」(full name). Every 3rd post, abbreviating to「弊社」or「からもん」is acceptable.
-   - Avoid promotional phrases like「〜を販売中」「〜が最高」. Express as a personal insight or real experience instead.
+7. **Do NOT include any specific company names in the post.**
    - Use at most 1 hashtag per post, and vary it each time (never repeat the same hashtag consecutively).
 8. STRICTLY FORBIDDEN: Do NOT include the persona's name (e.g. '堀江貴文', '中野裕道', etc.) as a byline, signature, or attribution anywhere in the post (e.g. '- 堀江貴文', '— 堀江貴文', '堀江貴文より' are all forbidden). The post is written AS the persona, not attributed TO the persona.
 
@@ -109,7 +105,9 @@ def build_user_prompt(topic: str, company_info: dict, source_text: str = "") -> 
         company_info: color_monster.json の静的会社情報
         source_text: Google Drive / Notion から取得した動的な一次情報テキスト
     """
-    company_context = json.dumps(company_info, ensure_ascii=False)
+    # 会社名を含めないよう、company_infoから会社名関連を除外
+    filtered_info = {k: v for k, v in company_info.items() if k not in ("company_name",)}
+    company_context = json.dumps(filtered_info, ensure_ascii=False)
 
     # 一次情報セクション（取得できている場合のみ追加）
     source_section = ""
@@ -141,9 +139,7 @@ def build_user_prompt(topic: str, company_info: dict, source_text: str = "") -> 
 - 会社情報と一次情報を自然に織り交ぜ、広告っぽくならないようにする
 - エンゲージメントが高く、シェアしたくなる内容にする
 - 一次情報がある場合は、それを具体的なエピソードや数字として盛り込む
-- **【推奨】会社名の記載は以下のルールに従うこと:**
-  - 基本は「株式会社からもん」と正式名称を使用する。3回に1回程度は「弊社」や「からもん」と略しても可。
-  - 「〜を販売中」「〜が最高」などの宣伝文句を避け、実体験に基づいた「気づき」として表現すること。
+- **【重要】特定の会社名は投稿に含めないこと。**
   - ハッシュタグは最大1つに絞り、毎回変えること（同じハッシュタグの連続使用は不可）。
 
 ## 出力形式

@@ -7,6 +7,7 @@ engine/category_manager.py
 
 import json
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -15,8 +16,24 @@ NO9_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(NO9_DIR, "data")
 CATEGORIES_PATH = os.path.join(DATA_DIR, "categories.json")
 
+# Firebase共有クライアントをインポート（プロジェクトルート経由）
+_ROOT = os.path.dirname(NO9_DIR)  # Xエージェント/
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+try:
+    from firebase_client import load_doc, save_doc
+    _FIREBASE_IMPORTED = True
+except ImportError:
+    _FIREBASE_IMPORTED = False
+
+_FS_KEY = "no9_categories"
+
 
 def _load() -> List[Dict]:
+    if _FIREBASE_IMPORTED:
+        result = load_doc(_FS_KEY)
+        if result is not None:
+            return result
     if not os.path.exists(CATEGORIES_PATH):
         return []
     with open(CATEGORIES_PATH, "r", encoding="utf-8") as f:
@@ -24,6 +41,8 @@ def _load() -> List[Dict]:
 
 
 def _save(categories: List[Dict]):
+    if _FIREBASE_IMPORTED:
+        save_doc(_FS_KEY, categories)
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(CATEGORIES_PATH, "w", encoding="utf-8") as f:
         json.dump(categories, f, ensure_ascii=False, indent=2)

@@ -1,8 +1,10 @@
 const API_BASE = '/no9-api'
+const _API_KEY = import.meta.env.VITE_API_KEY || ''
+const _authHeaders = _API_KEY ? { 'X-Api-Key': _API_KEY } : {}
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ..._authHeaders, ...options.headers },
     ...options,
   })
   if (!res.ok) {
@@ -93,13 +95,13 @@ export const api = {
   // アカウント追加・編集（X Agent backendの /api/accounts を利用）
   addAccount: (config) => fetch('/api/accounts', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ..._authHeaders },
     body: JSON.stringify(config),
   }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'API Error') })),
 
   editAccount: (id, config) => fetch(`/api/accounts/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ..._authHeaders },
     body: JSON.stringify(config),
   }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'API Error') })),
 }

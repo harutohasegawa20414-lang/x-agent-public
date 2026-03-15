@@ -19,10 +19,19 @@ NO9_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if NO9_DIR not in sys.path:
     sys.path.insert(0, NO9_DIR)
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    _SLOWAPI_AVAILABLE = True
+except ImportError:
+    _SLOWAPI_AVAILABLE = False
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -63,6 +72,29 @@ _scheduler = None
 _cached_bearer_token: str = None
 
 
+def _get_current_x_credentials() -> Dict[str, str]:
+    """現在のアカウント（accounts.json）からX API認証情報を取得する。
+    アカウントマネージャーが利用不可の場合は.envにフォールバック。"""
+    if _ACCOUNT_MANAGER_AVAILABLE:
+        try:
+            acc = account_manager.get_current_account()
+            if acc and acc.get("x_api_key"):
+                return {
+                    "api_key": acc["x_api_key"],
+                    "api_secret": acc.get("x_api_secret", ""),
+                    "access_token": acc.get("x_access_token", ""),
+                    "access_token_secret": acc.get("x_access_token_secret", ""),
+                }
+        except Exception as e:
+            print(f"[WARN] アカウント取得失敗、.envにフォールバック: {e}")
+    return {
+        "api_key": settings.X_API_KEY or "",
+        "api_secret": settings.X_API_SECRET or "",
+        "access_token": settings.X_ACCESS_TOKEN or "",
+        "access_token_secret": settings.X_ACCESS_TOKEN_SECRET or "",
+    }
+
+
 def _get_bearer_token(api_key: str, api_secret: str) -> str:
     """APIキー・シークレットからBearer Tokenを取得する（stdlib使用）"""
     try:
@@ -84,13 +116,32 @@ def _get_bearer_token(api_key: str, api_secret: str) -> str:
 
 
 def _get_cached_bearer_token() -> str:
-    """キャッシュ付きBearer Token取得（取得済みなら再取得しない）"""
+    """キャッシュ付きBearer Token取得。現在アカウントの認証情報を優先的に使用する。"""
     global _cached_bearer_token
     if _cached_bearer_token:
         return _cached_bearer_token
+
+    # 1. 現在アカウント（accounts.json）のx_api_key / x_api_secretからBearerTokenを生成
+    if _ACCOUNT_MANAGER_AVAILABLE:
+        try:
+            acc = account_manager.get_current_account()
+            if acc:
+                key = acc.get("x_api_key", "")
+                secret = acc.get("x_api_secret", "")
+                if key and secret:
+                    token = _get_bearer_token(key, secret)
+                    if token:
+                        _cached_bearer_token = token
+                        return _cached_bearer_token
+        except Exception as _e:
+            print(f"[WARN] account_manager経由のBearer Token取得失敗: {_e}")
+
+    # 2. .envのX_BEARER_TOKENをフォールバックとして使用
     if settings.X_BEARER_TOKEN:
         _cached_bearer_token = settings.X_BEARER_TOKEN
         return _cached_bearer_token
+
+    # 3. .envのX_API_KEY / X_API_SECRETから生成
     if settings.X_API_KEY and settings.X_API_SECRET:
         _cached_bearer_token = _get_bearer_token(settings.X_API_KEY, settings.X_API_SECRET)
     return _cached_bearer_token
@@ -99,11 +150,12 @@ def _get_cached_bearer_token() -> str:
 def _scheduled_poll():
     """5分ごとにDM返信をポーリング"""
     try:
+        creds = _get_current_x_credentials()
         reply_monitor.poll_dm_replies(
-            api_key=settings.X_API_KEY,
-            api_secret=settings.X_API_SECRET,
-            access_token=settings.X_ACCESS_TOKEN,
-            access_token_secret=settings.X_ACCESS_TOKEN_SECRET,
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+            access_token=creds["access_token"],
+            access_token_secret=creds["access_token_secret"],
             openai_api_key=settings.OPENAI_API_KEY,
         )
     except Exception as e:
@@ -179,17 +231,18 @@ def _scheduled_auto_send():
             if not dm_text:
                 continue
 
-            # 送信
+            # 送信（アカウントマネージャーの認証情報を使用）
+            creds = _get_current_x_credentials()
             result = dm_sender.send_dm(
                 user_id=target["user_id"],
                 username=target["username"],
                 dm_text=dm_text,
                 category_id=target["category_id"],
                 target_id=target["id"],
-                api_key=settings.X_API_KEY,
-                api_secret=settings.X_API_SECRET,
-                access_token=settings.X_ACCESS_TOKEN,
-                access_token_secret=settings.X_ACCESS_TOKEN_SECRET,
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+                access_token=creds["access_token"],
+                access_token_secret=creds["access_token_secret"],
                 category_limit_override=cat_limit,
             )
 
@@ -327,13 +380,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# レート制限（slowapi）
+if _SLOWAPI_AVAILABLE:
+    _limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
+    app.state.limiter = _limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5001,http://localhost:5003")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Api-Key"],
 )
+
+# API認証ミドルウェア
+_API_SECRET_KEY = os.getenv("API_SECRET_KEY", "").strip()
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if _API_SECRET_KEY:
+        api_key = request.headers.get("x-api-key")
+        if api_key != _API_SECRET_KEY:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
 
 
 # ============================================================
@@ -503,15 +575,14 @@ def get_accounts():
 def get_current_account():
     if not _ACCOUNT_MANAGER_AVAILABLE:
         raise HTTPException(status_code=503, detail="account_manager利用不可")
-    all_accs = account_manager.load_accounts()
+    # No.9専用のcurrent_account.jsonが設定済みの場合のみ返す（X Agentのcurrentは引き継がない）
     no9_current_id = _no9_get_current_account_id()
-    if no9_current_id:
-        acc = next((a for a in all_accs if a["id"] == no9_current_id), None)
-    else:
-        # 未設定の場合はX Agentのcurrentをそのまま返す
-        acc = next((a for a in all_accs if a.get("is_current")), None) or (all_accs[0] if all_accs else None)
+    if not no9_current_id:
+        return None
+    all_accs = account_manager.load_accounts()
+    acc = next((a for a in all_accs if a["id"] == no9_current_id), None)
     if not acc:
-        raise HTTPException(status_code=404, detail="アカウントが見つかりません")
+        return None
     return {"id": acc["id"], "name": acc["name"]}
 
 
@@ -715,6 +786,43 @@ def get_replenish_status():
     }
 
 
+@app.post("/targets/{target_id}/mark-replied")
+def mark_target_replied(target_id: str):
+    """ターゲットを手動で「返信あり」に更新し、返信レコードを作成する。
+    X APIのE2E暗号化により自動検出が不可能なため、手動登録用。"""
+    targets = user_searcher.list_targets()
+    target = next((t for t in targets if t["id"] == target_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="ターゲットが見つかりません")
+
+    # DM履歴から送信済みエントリを検索
+    history = dm_sender.list_dm_history()
+    sent_dm = next(
+        (h for h in history if h.get("user_id") == target["user_id"] and h.get("status") == "sent"),
+        None,
+    )
+    dm_history_id = sent_dm["id"] if sent_dm else ""
+
+    # 返信レコード作成（暗号化扱い）
+    reply = reply_monitor.add_reply(
+        dm_history_id=dm_history_id,
+        user_id=target["user_id"],
+        username=target["username"],
+        reply_text="",
+        category_id=target["category_id"],
+        target_id=target["id"],
+        openai_api_key=settings.OPENAI_API_KEY,
+        dm_event_id=f"manual_{datetime.now().strftime('%Y%m%d%H%M%S')}_{target_id[:8]}",
+        is_encrypted=True,
+    )
+
+    # ターゲットステータスを「返信あり」に更新
+    user_searcher.update_target_status(target_id, "replied")
+    category_manager.update_category_stats(target["category_id"], replied_delta=1)
+
+    return {"success": True, "reply": reply}
+
+
 @app.delete("/targets/{target_id}")
 def delete_target(target_id: str):
     """指定IDのターゲットを個別削除"""
@@ -868,16 +976,17 @@ def send_dm(req: DMSendRequest):
     if category and category.get("test_mode"):
         category_limit_override = category.get("test_mode_limit", 3)
 
+    creds = _get_current_x_credentials()
     result = dm_sender.send_dm(
         user_id=target["user_id"],
         username=target["username"],
         dm_text=req.dm_text,
         category_id=target["category_id"],
         target_id=target["id"],
-        api_key=settings.X_API_KEY,
-        api_secret=settings.X_API_SECRET,
-        access_token=settings.X_ACCESS_TOKEN,
-        access_token_secret=settings.X_ACCESS_TOKEN_SECRET,
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        access_token=creds["access_token"],
+        access_token_secret=creds["access_token_secret"],
         category_limit_override=category_limit_override,
     )
 
@@ -1050,11 +1159,12 @@ def get_reply_stats():
 @app.post("/replies/poll")
 def poll_replies():
     """DM返信を手動ポーリング"""
+    creds = _get_current_x_credentials()
     return reply_monitor.poll_dm_replies(
-        api_key=settings.X_API_KEY,
-        api_secret=settings.X_API_SECRET,
-        access_token=settings.X_ACCESS_TOKEN,
-        access_token_secret=settings.X_ACCESS_TOKEN_SECRET,
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        access_token=creds["access_token"],
+        access_token_secret=creds["access_token_secret"],
         openai_api_key=settings.OPENAI_API_KEY,
     )
 
