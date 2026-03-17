@@ -17,5 +17,7 @@ COPY firebase_client.py .
 
 # Cloud Run はポート 8080 を使用
 ENV PORT=8080
+# 本番環境では Firebase（Firestore）を使用
+ENV USE_FIREBASE=true
 
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -22,8 +22,8 @@ if NO9_DIR not in sys.path:
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+from typing import List, Literal, Optional, Dict, Any
 
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -51,13 +51,25 @@ from engine import (
     notion_fetcher,
 )
 
-# X AgentのアカウントマネージャーをROOT_DIR経由でインポート
+# X Agentのアカウントマネージャーをインポート
+# ローカル: Xエージェント/engine/account_manager.py
+# Cloud Run: /app/shared_engine/account_manager.py
 try:
     import importlib.util, pathlib
     _root = pathlib.Path(__file__).resolve().parent.parent.parent  # Xエージェント/
+    _am_path = _root / "engine" / "account_manager.py"
+    if not _am_path.exists():
+        # Cloud Run フォールバック
+        _am_path = pathlib.Path("/app/shared_engine/account_manager.py")
+    if not _am_path.exists():
+        raise FileNotFoundError("account_manager.py not found")
+    # shared_config をパスに追加（account_managerがconfig.settingsをimportするため）
+    _shared_config_dir = _am_path.parent.parent
+    if str(_shared_config_dir) not in sys.path:
+        sys.path.insert(0, str(_shared_config_dir))
     _spec = importlib.util.spec_from_file_location(
         "xagent_account_manager",
-        str(_root / "engine" / "account_manager.py"),
+        str(_am_path),
     )
     _acct_mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_acct_mod)
@@ -305,12 +317,19 @@ def _scheduled_replenish():
                 continue
             search_kw = " ".join(kws[:3])
 
-            # 検索・スコアリング・追加
-            users = user_searcher.search_users_by_keyword(
+            # 検索・スコアリング・追加（プロフィール検索優先）
+            creds = _get_current_x_credentials()
+            result = user_searcher.search_users(
                 keyword=search_kw,
                 max_results=20,
+                search_mode="profile",
                 bearer_token=bearer_token,
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+                access_token=creds["access_token"],
+                access_token_secret=creds["access_token_secret"],
             )
+            users = result["users"]
             scores = {}
             scored_users = []
             for user in users:
@@ -396,6 +415,13 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Api-Key"],
 )
 
+# Firebase Hosting は /no9-api/** をプレフィックス付きのまま転送するため剥がす
+@app.middleware("http")
+async def strip_prefix_middleware(request: Request, call_next):
+    if request.url.path.startswith("/no9-api"):
+        request.scope["path"] = request.url.path[len("/no9-api"):] or "/"
+    return await call_next(request)
+
 # API認証ミドルウェア
 _API_SECRET_KEY = os.getenv("API_SECRET_KEY", "").strip()
 
@@ -443,10 +469,11 @@ class CategoryUpdate(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    keyword: str
+    keyword: str = Field(..., min_length=1, max_length=200)
     category_id: str
-    max_results: int = 20
-    score_threshold: float = 0.0
+    max_results: int = Field(20, ge=1, le=100)
+    score_threshold: float = Field(0.0, ge=0.0, le=100.0)
+    search_mode: Literal["profile", "tweet"] = "profile"
 
 
 class TemplateCreate(BaseModel):
@@ -552,6 +579,97 @@ def _no9_get_current_account_id() -> Optional[str]:
 
 def _no9_save_current_account_id(account_id: str):
     _NO9_CURRENT_ACC_FILE.write_text(_json.dumps({"current_account_id": account_id}))
+
+
+import re as _re
+
+_ACCOUNT_ID_PATTERN = _re.compile(r'^[a-zA-Z0-9_]{1,64}$')
+_ACCOUNT_NAME_MAX = 100
+_CREDENTIAL_MAX = 256
+
+
+def _validate_account_id(account_id: str):
+    if not _ACCOUNT_ID_PATTERN.match(account_id):
+        raise HTTPException(status_code=422, detail="アカウントIDは英数字・アンダースコアのみ（1-64文字）")
+
+
+def _validate_credential_length(value: str, field: str):
+    if len(value) > _CREDENTIAL_MAX:
+        raise HTTPException(status_code=422, detail=f"{field}が長すぎます（最大{_CREDENTIAL_MAX}文字）")
+
+
+class AddAccountRequest(BaseModel):
+    id: str
+    name: str
+    x_api_key: str
+    x_api_secret: str
+    x_access_token: str
+    x_access_token_secret: str
+
+class EditAccountRequest(BaseModel):
+    name: str
+    x_api_key: str
+    x_api_secret: str
+    x_access_token: str
+    x_access_token_secret: str
+
+
+@app.post("/accounts")
+def add_account(request: AddAccountRequest):
+    if not _ACCOUNT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="account_manager利用不可")
+    _validate_account_id(request.id)
+    if not request.name or len(request.name) > _ACCOUNT_NAME_MAX:
+        raise HTTPException(status_code=422, detail=f"アカウント名は1-{_ACCOUNT_NAME_MAX}文字で入力してください")
+    for field_name, value in [("x_api_key", request.x_api_key), ("x_api_secret", request.x_api_secret),
+                               ("x_access_token", request.x_access_token), ("x_access_token_secret", request.x_access_token_secret)]:
+        _validate_credential_length(value, field_name)
+    try:
+        result = account_manager.add_account(
+            account_id=request.id,
+            name=request.name,
+            x_api_key=request.x_api_key,
+            x_api_secret=request.x_api_secret,
+            x_access_token=request.x_access_token,
+            x_access_token_secret=request.x_access_token_secret,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.put("/accounts/{account_id}")
+def edit_account(account_id: str, request: EditAccountRequest):
+    if not _ACCOUNT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="account_manager利用不可")
+    _validate_account_id(account_id)
+    if not request.name or len(request.name) > _ACCOUNT_NAME_MAX:
+        raise HTTPException(status_code=422, detail=f"アカウント名は1-{_ACCOUNT_NAME_MAX}文字で入力してください")
+    for field_name, value in [("x_api_key", request.x_api_key), ("x_api_secret", request.x_api_secret),
+                               ("x_access_token", request.x_access_token), ("x_access_token_secret", request.x_access_token_secret)]:
+        _validate_credential_length(value, field_name)
+    success = account_manager.edit_account(
+        account_id=account_id,
+        name=request.name,
+        x_api_key=request.x_api_key,
+        x_api_secret=request.x_api_secret,
+        x_access_token=request.x_access_token,
+        x_access_token_secret=request.x_access_token_secret,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"status": "updated"}
+
+
+@app.delete("/accounts/{account_id}")
+def remove_account(account_id: str):
+    if not _ACCOUNT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="account_manager利用不可")
+    _validate_account_id(account_id)
+    success = account_manager.delete_account(account_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot delete current account or account not found")
+    return {"status": "deleted"}
 
 
 @app.get("/accounts")
@@ -691,12 +809,20 @@ def search_targets(req: SearchRequest):
     if not category:
         raise HTTPException(status_code=404, detail="カテゴリが見つかりません")
 
-    # ユーザー検索
-    users = user_searcher.search_users_by_keyword(
+    # ユーザー検索（統合ディスパッチ）
+    creds = _get_current_x_credentials()
+    result = user_searcher.search_users(
         keyword=req.keyword,
         max_results=req.max_results,
+        search_mode=req.search_mode,
         bearer_token=_get_cached_bearer_token(),
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        access_token=creds["access_token"],
+        access_token_secret=creds["access_token_secret"],
     )
+    users = result["users"]
+    search_mode_used = result["search_mode_used"]
 
     # スコアリング
     scores = {}
@@ -720,6 +846,7 @@ def search_targets(req: SearchRequest):
         "scored": len(scored_users),
         "added": len(new_targets),
         "targets": new_targets,
+        "search_mode_used": search_mode_used,
     }
 
 
@@ -856,12 +983,19 @@ def replenish_category_targets(category_id: str):
 
     search_kw = " ".join(kws[:3])
     bearer_token = _get_cached_bearer_token()
+    creds = _get_current_x_credentials()
 
-    users = user_searcher.search_users_by_keyword(
+    result = user_searcher.search_users(
         keyword=search_kw,
         max_results=20,
+        search_mode="profile",
         bearer_token=bearer_token,
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        access_token=creds["access_token"],
+        access_token_secret=creds["access_token_secret"],
     )
+    users = result["users"]
     scores = {}
     scored_users = []
     for user in users:

@@ -151,6 +151,146 @@ def calculate_score(user: Dict, conditions: Dict, weights: Dict) -> float:
     return round(min(score, 100.0), 1)
 
 
+# ============================================================
+# bio 判定用: 関連語辞書 & 肩書きパターン
+# ============================================================
+
+# 各カテゴリ: triggers (検索語にこれが含まれたら発動), synonyms (bio単純一致), patterns (bio正規表現)
+_BIO_CATEGORIES = [
+    {
+        "triggers": {"経営", "経営者", "起業", "起業家", "創業", "オーナー", "社長", "代表", "ceo"},
+        "synonyms": {"経営者", "起業家", "創業者", "実業家", "事業家", "オーナー", "社長", "会長"},
+        "patterns": [
+            r"経営者", r"経営して", r"会社経営",
+            r"代表取締役", r"代表\b",
+            r"社長", r"CEO", r"COO", r"CFO",
+            r"創業者", r"創業\d", r"ファウンダー", r"founder",
+            r"起業家", r"起業\d+年", r"起業して",
+            r"オーナー", r"事業家", r"実業家", r"会長",
+            r"取締役", r"理事", r"director",
+            r"㈱.{1,50}代表", r"株式会社.{1,50}代表",
+            r"年商\d", r"法人\d",
+        ],
+        "exclude": [r"事業家集団"],
+    },
+    {
+        "triggers": {"エンジニア", "プログラマー", "開発者", "developer", "プログラマ"},
+        "synonyms": {"エンジニア", "プログラマー", "プログラマ", "開発者", "developer", "engineer", "swe"},
+        "patterns": [
+            r"エンジニア", r"プログラマ", r"開発者",
+            r"developer", r"engineer", r"SWE",
+            r"フルスタック", r"full.?stack", r"フロントエンド", r"バックエンド",
+            r"frontend", r"backend", r"web開発", r"アプリ開発",
+            r"CTO", r"tech.?lead", r"テックリード",
+            r"コーダー", r"coder",
+        ],
+    },
+    {
+        "triggers": {"デザイナー", "デザイン", "designer", "クリエイター"},
+        "synonyms": {"デザイナー", "クリエイター", "designer", "creator", "アートディレクター"},
+        "patterns": [
+            r"デザイナー", r"designer", r"クリエイター", r"creator",
+            r"UI/?UX", r"グラフィック", r"graphic",
+            r"アートディレクター", r"art.?director",
+            r"イラストレーター", r"illustrator",
+            r"ウェブデザイン", r"web.?design",
+        ],
+    },
+    {
+        "triggers": {"投資家", "投資", "vc", "エンジェル", "investor"},
+        "synonyms": {"投資家", "investor", "エンジェル投資", "vc", "ベンチャーキャピタル"},
+        "patterns": [
+            r"投資家", r"investor", r"エンジェル",
+            r"VC", r"ベンチャーキャピタル", r"venture.?capital",
+            r"ファンド", r"fund", r"資産運用",
+            r"トレーダー", r"trader",
+            r"個人投資", r"不動産投資",
+        ],
+    },
+    {
+        "triggers": {"マーケター", "マーケティング", "marketer", "marketing"},
+        "synonyms": {"マーケター", "marketer", "マーケティング"},
+        "patterns": [
+            r"マーケター", r"marketer", r"マーケティング", r"marketing",
+            r"CMO", r"グロース", r"growth",
+            r"広告運用", r"SNS運用", r"web集客",
+            r"コピーライター", r"copywriter",
+            r"ブランディング", r"branding",
+        ],
+    },
+    {
+        "triggers": {"コンサル", "コンサルタント", "consultant", "アドバイザー"},
+        "synonyms": {"コンサルタント", "コンサル", "consultant", "アドバイザー", "advisor"},
+        "patterns": [
+            r"コンサルタント", r"コンサル", r"consultant",
+            r"アドバイザー", r"advisor", r"adviser",
+            r"戦略", r"strategy", r"経営支援",
+            r"士業", r"税理士", r"会計士", r"弁護士", r"社労士",
+        ],
+    },
+    {
+        "triggers": {"営業", "セールス", "sales"},
+        "synonyms": {"営業", "セールス", "sales", "営業部長", "営業マネージャー"},
+        "patterns": [
+            r"営業", r"セールス", r"sales",
+            r"法人営業", r"BtoB", r"B2B",
+            r"インサイドセールス", r"フィールドセールス",
+            r"営業部長", r"営業マネージャー",
+        ],
+    },
+    {
+        "triggers": {"医師", "医者", "ドクター", "doctor", "医療"},
+        "synonyms": {"医師", "医者", "ドクター", "doctor", "歯科医", "薬剤師"},
+        "patterns": [
+            r"医師", r"医者", r"ドクター", r"doctor", r"Dr\.",
+            r"外科", r"内科", r"歯科", r"薬剤師",
+            r"院長", r"クリニック", r"病院",
+            r"看護師", r"nurse",
+        ],
+    },
+]
+
+
+def _build_bio_matchers(search_terms: List[str]):
+    """検索語から関連するbioパターンと同義語セットを構築する。"""
+    matched_patterns = []
+    matched_synonyms = set()
+    matched_excludes = []
+    terms_lower = {t.lower() for t in search_terms}
+
+    for cat in _BIO_CATEGORIES:
+        # triggers のいずれかが検索語に含まれていれば発動
+        if any(trigger in term or term in trigger for trigger in cat["triggers"] for term in terms_lower):
+            matched_patterns.extend(cat.get("patterns", []))
+            matched_synonyms.update(cat.get("synonyms", set()))
+            matched_excludes.extend(cat.get("exclude", []))
+
+    # どのカテゴリにもマッチしなければ、検索語そのものをsynonymとして使う
+    if not matched_synonyms:
+        matched_synonyms = terms_lower
+
+    return (matched_patterns, matched_excludes), matched_synonyms
+
+
+def _is_bio_match(combined_text: str, patterns_tuple, synonyms: set) -> bool:
+    """bio+表示名テキストが関連語/パターンにマッチするか判定する。"""
+    patterns, excludes = patterns_tuple
+
+    # 除外パターンに該当したら不一致
+    if any(re.search(p, combined_text, re.IGNORECASE) for p in excludes):
+        return False
+
+    # 同義語の単純一致
+    if any(syn in combined_text for syn in synonyms):
+        return True
+
+    # 正規表現パターン
+    if any(re.search(p, combined_text, re.IGNORECASE) for p in patterns):
+        return True
+
+    return False
+
+
 def search_users_by_keyword(
     keyword: str,
     max_results: int = 20,
@@ -165,14 +305,29 @@ def search_users_by_keyword(
 
     try:
         client = tweepy.Client(bearer_token=bearer_token)
+        # スペース区切りキーワードをOR結合（複数語で検索ヒット率を上げる）
+        terms = keyword.strip().split()
+        if len(terms) > 1:
+            or_query = " OR ".join(terms)
+            query = f"({or_query}) -is:retweet lang:ja"
+        else:
+            query = f"{keyword} -is:retweet lang:ja"
+
+        # 母数を最大化（100件=1APIコール）してbioマッチユーザーを多く確保
         response = client.search_recent_tweets(
-            query=f"{keyword} -is:retweet lang:ja",
-            max_results=max(10, min(max_results * 2, 100)),
+            query=query,
+            max_results=100,
             expansions=["author_id"],
             user_fields=["name", "username", "description", "public_metrics", "created_at", "verified"],
             tweet_fields=["public_metrics", "created_at"],
         )
-        users = []
+
+        # bio 判定用: 関連語辞書 & 肩書きパターン辞書
+        bio_patterns, bio_synonyms = _build_bio_matchers(terms)
+
+        bio_matched = []   # bioにキーワード/肩書きがあるユーザー（優先）
+        others = []        # それ以外
+
         if response.includes and "users" in response.includes:
             tweets_by_author = {}
             if response.data:
@@ -186,32 +341,12 @@ def search_users_by_keyword(
                         "created_at": str(tweet.created_at) if getattr(tweet, "created_at", None) else None,
                     })
 
-            # 検索キーワードを照合用に展開
-            # スペース区切りで分割し、さらに各タームを2文字以上のサブワードにも分解
-            raw_terms = keyword.lower().split()
-            keyword_terms = set()
-            for t in raw_terms:
-                keyword_terms.add(t)
-                # 3文字以上の場合、2文字の部分文字列も候補に追加（例:「経営者」→「経営」「営者」）
-                if len(t) >= 3:
-                    for i in range(len(t) - 1):
-                        keyword_terms.add(t[i:i+2])
-
             seen_ids = set()
             for user in response.includes["users"]:
                 uid = str(user.id)
                 if uid in seen_ids:
                     continue
                 seen_ids.add(uid)
-
-                # bio・表示名・ユーザー名のいずれかにキーワードが含まれていれば通過
-                profile_text = " ".join([
-                    (user.description or "").lower(),
-                    (user.name or "").lower(),
-                    (user.username or "").lower(),
-                ])
-                if not any(term in profile_text for term in keyword_terms):
-                    continue
 
                 metrics = user.public_metrics or {}
                 followers = metrics.get("followers_count", 0)
@@ -234,7 +369,7 @@ def search_users_by_keyword(
                     if tweet.get("created_at") and (last_post_date is None or tweet["created_at"] > last_post_date):
                         last_post_date = tweet["created_at"]
 
-                users.append({
+                user_dict = {
                     "id": uid,
                     "name": user.name,
                     "username": user.username,
@@ -248,9 +383,17 @@ def search_users_by_keyword(
                     "last_post_date": last_post_date,
                     "profile_url": f"https://x.com/{user.username}",
                     "verified": user.verified,
-                })
-                if len(users) >= max_results:
-                    break
+                }
+
+                # bio + 表示名で判定
+                combined = ((user.description or "") + " " + (user.name or "")).lower()
+                if _is_bio_match(combined, bio_patterns, bio_synonyms):
+                    bio_matched.append(user_dict)
+                else:
+                    others.append(user_dict)
+
+        # bio マッチを優先し、足りなければ残りで補完
+        users = (bio_matched + others)[:max_results]
         return users
     except Exception as e:
         print(f"[WARN] X API search failed: {e}. Falling back to mock.")
@@ -281,6 +424,141 @@ def _mock_search_users(keyword: str, max_results: int = 10) -> List[Dict]:
             "is_mock": True,
         })
     return mock_users
+
+
+def search_users_by_profile(
+    keyword: str,
+    max_results: int = 20,
+    api_key: str = None,
+    api_secret: str = None,
+    access_token: str = None,
+    access_token_secret: str = None,
+    max_pages: int = 3,  # 上限5
+
+) -> List[Dict]:
+    """
+    v1.1 API.search_users() を使ってプロフィール（bio/名前/ユーザー名）を直接検索する。
+    OAuth 1.0a 認証が必要。認証失敗・レート制限時はモックにフォールバック。
+    """
+    max_pages = min(max_pages, 5)
+    if not TWEEPY_AVAILABLE or not all([api_key, api_secret, access_token, access_token_secret]):
+        return _mock_search_users(keyword, max_results)
+
+    try:
+        auth = tweepy.OAuth1UserHandler(api_key, api_secret, access_token, access_token_secret)
+        api = tweepy.API(auth, wait_on_rate_limit=False)
+
+        users = []
+        seen_ids = set()
+        for page in range(1, max_pages + 1):
+            try:
+                results = api.search_users(q=keyword, page=page, count=20)
+            except tweepy.TooManyRequests:
+                print(f"[WARN] v1.1 search_users rate limit at page {page}")
+                break
+            except Exception as e:
+                print(f"[WARN] v1.1 search_users page {page} error: {e}")
+                break
+
+            if not results:
+                break
+
+            for u in results:
+                uid = str(u.id)
+                if uid in seen_ids:
+                    continue
+                seen_ids.add(uid)
+
+                metrics = {
+                    "followers_count": u.followers_count or 0,
+                    "following_count": u.friends_count or 0,
+                    "tweet_count": u.statuses_count or 0,
+                }
+
+                # 最新ツイート1件（status属性があれば取得）
+                recent_posts = []
+                last_post_date = None
+                hashtags_used = []
+                if hasattr(u, "status") and u.status:
+                    tweet_text = u.status.text or ""
+                    created = str(u.status.created_at) if u.status.created_at else None
+                    recent_posts.append({
+                        "text": tweet_text,
+                        "metrics": {},
+                        "created_at": created,
+                    })
+                    last_post_date = created
+                    hashtags_used = re.findall(r"#(\w+)", tweet_text)
+
+                # エンゲージメント（プロフィール検索では正確な値が取れないため0）
+                engagement_rate = 0.0
+
+                users.append({
+                    "id": uid,
+                    "name": u.name or "",
+                    "username": u.screen_name or "",
+                    "bio": u.description or "",
+                    "followers_count": metrics["followers_count"],
+                    "following_count": metrics["following_count"],
+                    "tweet_count": metrics["tweet_count"],
+                    "engagement_rate": engagement_rate,
+                    "recent_posts": recent_posts,
+                    "hashtags_used": list(set(hashtags_used)),
+                    "last_post_date": last_post_date,
+                    "profile_url": f"https://x.com/{u.screen_name}",
+                    "verified": getattr(u, "verified", False),
+                })
+
+                if len(users) >= max_results:
+                    break
+            if len(users) >= max_results:
+                break
+
+        return users
+    except Exception as e:
+        print(f"[WARN] v1.1 search_users failed: {e}. Falling back to mock.")
+        return _mock_search_users(keyword, max_results)
+
+
+def search_users(
+    keyword: str,
+    max_results: int = 20,
+    search_mode: str = "profile",
+    bearer_token: str = None,
+    api_key: str = None,
+    api_secret: str = None,
+    access_token: str = None,
+    access_token_secret: str = None,
+) -> Dict[str, Any]:
+    """
+    統合ディスパッチ関数。search_mode に応じて検索方式を切り替える。
+    返り値: {"users": [...], "search_mode_used": "profile"|"tweet"}
+    """
+    if search_mode == "profile":
+        users = search_users_by_profile(
+            keyword=keyword,
+            max_results=max_results,
+            api_key=api_key,
+            api_secret=api_secret,
+            access_token=access_token,
+            access_token_secret=access_token_secret,
+        )
+        if users:
+            return {"users": users, "search_mode_used": "profile"}
+        # プロフィール検索が0件の場合、bearer_token があればツイート検索にフォールバック
+        if bearer_token:
+            print("[INFO] プロフィール検索0件 → ツイート検索にフォールバック")
+            users = search_users_by_keyword(
+                keyword=keyword, max_results=max_results, bearer_token=bearer_token,
+            )
+            return {"users": users, "search_mode_used": "tweet"}
+        return {"users": [], "search_mode_used": "profile"}
+    else:
+        # tweet モード
+        users = search_users_by_keyword(
+            keyword=keyword, max_results=max_results, bearer_token=bearer_token,
+        )
+        return {"users": users, "search_mode_used": "tweet"}
 
 
 def add_targets(users: List[Dict], category_id: str, scores: Dict[str, float], search_keyword: str = "") -> List[Dict]:

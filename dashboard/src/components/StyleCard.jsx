@@ -18,7 +18,7 @@ const StyleCard = ({ style, post, loading, onGenerate, onPost, onSchedule, sched
                     <h3 className="style-name">{style.name}</h3>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    {style.is_custom && onDelete && (
+                    {onDelete && (
                         <button
                             onClick={() => onDelete(style.id)}
                             className="refresh-btn"

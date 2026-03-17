@@ -21,8 +21,7 @@ CACHE_TTL_SECONDS = 3600  # 1時間
 
 def load_selections() -> dict:
     if not os.path.exists(SELECTIONS_PATH):
-        return {"drive": [], "notion": [], "urls": []}
-    data = {}
+        return {"urls": []}
     with open(SELECTIONS_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
     data.setdefault("urls", [])
@@ -542,75 +541,22 @@ class SourceAggregator:
         return data
 
     def get_combined_text(self) -> str:
-        """選択されたファイル・エントリのテキストのみ返す（未選択時は全件）"""
-        cache = _load_cache()
+        """選択された URL ソースのテキストのみ返す（未選択時は空）"""
         selections = load_selections()
-        selected_drive = selections.get("drive", [])
-        selected_notion = selections.get("notion", [])
         selected_urls = selections.get("urls", [])
 
-        # 選択なし → ソースを使わない
-        if not selected_drive and not selected_notion and not selected_urls:
+        if not selected_urls:
             return ""
 
         parts = []
-
-        # Drive: 選択ファイルのみ再取得
-        if selected_drive:
-            fetcher = GoogleDriveFetcher()
-            service = fetcher._get_service()
-            if service:
-                texts = []
-                for file_id in selected_drive:
-                    try:
-                        meta = service.files().get(fileId=file_id, fields="name,mimeType").execute()
-                        mime = meta.get("mimeType", "")
-                        name = meta.get("name", "")
-                        if mime == "application/vnd.google-apps.document":
-                            content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
-                            text = content.decode("utf-8") if isinstance(content, bytes) else content
-                            texts.append(f"## {name}\n{text}")
-                        elif mime == "application/vnd.google-apps.spreadsheet":
-                            content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
-                            text = content.decode("utf-8") if isinstance(content, bytes) else content
-                            texts.append(f"## {name} (表形式)\n{text}")
-                    except Exception as e:
-                        print(f"[GoogleDrive] 選択ファイル取得エラー ({file_id}): {e}")
-                if texts:
-                    parts.append("### ▼ Google Drive から取得した情報\n" + "\n\n".join(texts))
-
-        # Notion: 選択エントリのみ
-        if selected_notion:
-            notion_cache_entries = cache.get("notion", {}).get("entries", [])
-            # IDをキーにしたマップが必要なため再取得
-            fetcher = NotionFetcher()
-            client = fetcher._get_client()
-            if client:
-                texts = []
-                for entry_id in selected_notion:
-                    try:
-                        page = client.pages.retrieve(page_id=entry_id)
-                        name = fetcher._get_entry_name(page)
-                        blocks_resp = client.blocks.children.list(block_id=entry_id)
-                        text = fetcher._extract_text_from_blocks(blocks_resp.get("results", []))
-                        if not text:
-                            text = fetcher._extract_text_from_properties(page.get("properties", {}))
-                        texts.append(f"### {name}\n{text}")
-                    except Exception as e:
-                        print(f"[Notion] 選択エントリ取得エラー ({entry_id}): {e}")
-                if texts:
-                    parts.append("### ▼ Notion から取得した情報\n" + "\n\n".join(texts))
-
-        # URL ソース
-        if selected_urls:
-            url_texts = []
-            for entry in selected_urls:
-                title = entry.get("title", "URL")
-                text = entry.get("text", "")
-                if text:
-                    url_texts.append(f"## {title}\n{text}")
-            if url_texts:
-                parts.append("### ▼ URL から取得した情報\n" + "\n\n".join(url_texts))
+        url_texts = []
+        for entry in selected_urls:
+            title = entry.get("title", "URL")
+            text = entry.get("text", "")
+            if text:
+                url_texts.append(f"## {title}\n{text}")
+        if url_texts:
+            parts.append("### ▼ URL から取得した情報\n" + "\n\n".join(url_texts))
 
         return "\n\n".join(parts)
 

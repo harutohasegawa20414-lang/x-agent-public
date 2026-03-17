@@ -264,7 +264,7 @@ const FrameworkExtractorPanel = ({
                                             padding: '0.65rem 0.8rem',
                                         }}>
                                             <p style={{ margin: '0 0 4px', fontSize: '0.62rem', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                                生成の型
+                                                投稿イメージ
                                             </p>
                                             <pre style={{
                                                 margin: 0,
@@ -417,7 +417,7 @@ const FrameworkExtractorPanel = ({
                                     padding: '0.65rem 0.8rem',
                                 }}>
                                     <p style={{ margin: '0 0 4px', fontSize: '0.62rem', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                        生成の型
+                                        投稿イメージ
                                     </p>
                                     <pre style={{
                                         margin: 0,

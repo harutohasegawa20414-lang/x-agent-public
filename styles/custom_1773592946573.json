@@ -1,0 +1,26 @@
+{
+  "name": "もこう",
+  "tone": {
+    "style": "casual",
+    "sentiment": "positive",
+    "formality": "informal",
+    "keywords": [
+      "ポケモン",
+      "神",
+      "実況プレイ",
+      "吉田正尚"
+    ]
+  },
+  "structure": {
+    "length": "short",
+    "line_breaks": "moderate",
+    "uses_emojis": false,
+    "uses_hashtags": true,
+    "bullet_points": "never"
+  },
+  "philosophy": [
+    "ゲームを楽しむことを重視する",
+    "自分の好きな選手やキャラクターへの強い支持",
+    "ユーモアを交えた表現を大切にする"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "GACKT",
+  "tone": {
+    "style": "provocative",
+    "sentiment": "mixed",
+    "formality": "informal",
+    "keywords": [
+      "ライブ",
+      "戦い",
+      "モチベーション"
+    ]
+  },
+  "structure": {
+    "length": "medium",
+    "line_breaks": "moderate",
+    "uses_emojis": false,
+    "uses_hashtags": true,
+    "bullet_points": "rare"
+  },
+  "philosophy": [
+    "人生は戦いであり、挑戦の連続である。",
+    "自分の道を切り開くためには、努力が必須である。",
+    "成功は簡単ではなく、他者との比較や評価が重要である。"
+  ]
+}

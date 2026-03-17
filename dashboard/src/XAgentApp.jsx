@@ -7,9 +7,9 @@ import AccountModal from './components/AccountModal'
 import ChatPanel from './components/ChatPanel'
 import AddStyleModal from './components/AddStyleModal'
 import FrameworkExtractorPanel from './components/FrameworkExtractorPanel'
-import { fetchStyles, generatePost, postToX, fetchSourceStatus, syncSources, fetchAccounts, fetchCurrentAccount, switchAccount, addAccount, editAccount, addCustomStyle, deleteCustomStyle, fetchGeneratedPosts, fetchFrameworks, saveFrameworks, deleteFramework, extractFrameworksByUsername, fetchSourceSelections } from './api'
+import { fetchStyles, generatePost, postToX, fetchAccounts, fetchCurrentAccount, switchAccount, addAccount, editAccount, addCustomStyle, deleteCustomStyle, fetchGeneratedPosts, fetchFrameworks, saveFrameworks, deleteFramework, extractFrameworksByUsername, fetchSourceSelections } from './api'
 import SourceSelector from './components/SourceSelector'
-import { RefreshCcw, Cpu, ShieldCheck, Zap, History, Settings2, ChevronDown, Check, Plus, Edit2 } from 'lucide-react'
+import { Link as LinkIcon, Cpu, ShieldCheck, Zap, History, Settings2, ChevronDown, Check, Plus, Edit2 } from 'lucide-react'
 
 const NAV = [
     { id: 'generate', label: '投稿生成', icon: Zap },
@@ -203,10 +203,8 @@ function XAgentApp() {
     const [posts, setPosts] = useState({})
     const [loading, setLoading] = useState({})
     const [scheduling, setScheduling] = useState({})
-    const [syncStatus, setSyncStatus] = useState(null)
-    const [syncLoading, setSyncLoading] = useState(false)
     const [showSourceSelector, setShowSourceSelector] = useState(false)
-    const [sourceSelections, setSourceSelections] = useState({ drive: [], notion: [], urls: [] })
+    const [sourceSelections, setSourceSelections] = useState({ urls: [] })
     const [activeTab, setActiveTab] = useState('generate')
     const [accounts, setAccounts] = useState([])
     const [currentAccount, setCurrentAccount] = useState(null)
@@ -234,10 +232,6 @@ function XAgentApp() {
                         if (entry?.content) restored[styleId] = entry.content
                     })
                     setPosts(restored)
-                } catch (_) { }
-                try {
-                    const statusData = await fetchSourceStatus()
-                    setSyncStatus(statusData)
                 } catch (_) { }
                 try {
                     const selData = await fetchSourceSelections()
@@ -268,19 +262,6 @@ function XAgentApp() {
             delete window.__generateAll
         }
     })
-
-    const handleSync = async () => {
-        setSyncLoading(true)
-        try {
-            await syncSources()
-            const statusData = await fetchSourceStatus()
-            setSyncStatus(statusData)
-        } catch (err) {
-            alert(`同期に失敗しました: ${err.message}`)
-        } finally {
-            setSyncLoading(false)
-        }
-    }
 
     const handleAddStyle = async (name, xUsername) => {
         const newStyle = await addCustomStyle(name, xUsername)
@@ -523,63 +504,41 @@ function XAgentApp() {
                                 onGenerateAll={generateAll}
                             />
 
-                            {/* ソース同期バー */}
+                            {/* ソースバー */}
                             <div className="sync-bar">
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
                                     <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.03em', flexShrink: 0 }}>ソース:</span>
                                     {(() => {
-                                        const tags = []
-                                        if (sourceSelections.drive?.length > 0) {
-                                            tags.push({ label: `Google Drive (${sourceSelections.drive.length}件)`, color: '#34d399', bg: 'rgba(52,211,153,0.1)' })
-                                        }
-                                        if (sourceSelections.notion?.length > 0) {
-                                            tags.push({ label: `Notion (${sourceSelections.notion.length}件)`, color: '#a78bfa', bg: 'rgba(167,139,250,0.1)' })
-                                        }
-                                        if (sourceSelections.urls?.length > 0) {
-                                            sourceSelections.urls.forEach(u => {
-                                                tags.push({
-                                                    label: u.title || 'URL',
-                                                    color: u.type === 'gdrive' ? '#34d399' : '#a855f7',
-                                                    bg: u.type === 'gdrive' ? 'rgba(52,211,153,0.1)' : 'rgba(168,85,247,0.1)',
-                                                    icon: u.type === 'gdrive' ? 'G' : 'N',
-                                                })
-                                            })
-                                        }
-                                        if (tags.length === 0) {
+                                        const urls = sourceSelections.urls || []
+                                        if (urls.length === 0) {
                                             return <span style={{ color: '#475569', fontSize: '0.8rem' }}>未選択</span>
                                         }
-                                        return tags.map((tag, i) => (
+                                        return urls.map((u, i) => (
                                             <span key={i} style={{
                                                 display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
                                                 padding: '0.2rem 0.6rem', borderRadius: '6px',
-                                                background: tag.bg, border: `1px solid ${tag.color}33`,
-                                                color: tag.color, fontSize: '0.75rem', fontWeight: 600,
+                                                background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)',
+                                                color: '#60a5fa', fontSize: '0.75rem', fontWeight: 600,
                                             }}>
-                                                {tag.icon && <span style={{ fontSize: '0.65rem', fontWeight: 800 }}>{tag.icon}</span>}
-                                                {tag.label}
+                                                <LinkIcon size={11} />
+                                                {u.title || 'URL'}
                                             </span>
                                         ))
                                     })()}
                                 </div>
-                                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        onClick={() => setShowSourceSelector(true)}
-                                        style={{
-                                            display: 'flex', alignItems: 'center', gap: '0.4rem',
-                                            padding: '0.45rem 0.9rem', borderRadius: '8px',
-                                            background: 'rgba(96,165,250,0.08)',
-                                            border: '1px solid rgba(96,165,250,0.2)',
-                                            color: '#93c5fd', cursor: 'pointer',
-                                            fontSize: '0.8rem', fontWeight: 600,
-                                        }}
-                                    >
-                                        ソースを選択
-                                    </button>
-                                    <button onClick={handleSync} disabled={syncLoading} className="sync-btn">
-                                        <RefreshCcw style={{ width: '14px', height: '14px' }} className={syncLoading ? 'animate-spin' : ''} />
-                                        <span>同期</span>
-                                    </button>
-                                </div>
+                                <button
+                                    onClick={() => setShowSourceSelector(true)}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: '0.4rem',
+                                        padding: '0.45rem 0.9rem', borderRadius: '8px',
+                                        background: 'rgba(96,165,250,0.08)',
+                                        border: '1px solid rgba(96,165,250,0.2)',
+                                        color: '#93c5fd', cursor: 'pointer',
+                                        fontSize: '0.8rem', fontWeight: 600,
+                                    }}
+                                >
+                                    ソースを選択
+                                </button>
                             </div>
                             {showSourceSelector && (
                                 <SourceSelector

@@ -92,16 +92,18 @@ export const api = {
   getCurrentAccount: () => apiFetch('/accounts/current'),
   switchAccount: (id) => apiFetch(`/accounts/switch/${id}`, { method: 'POST' }),
 
-  // アカウント追加・編集（X Agent backendの /api/accounts を利用）
-  addAccount: (config) => fetch('/api/accounts', {
+  // アカウント追加・編集・削除（No.9 backend を利用）
+  addAccount: (config) => apiFetch('/accounts', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ..._authHeaders },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
-  }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'API Error') })),
+  }),
 
-  editAccount: (id, config) => fetch(`/api/accounts/${id}`, {
+  editAccount: (id, config) => apiFetch(`/accounts/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ..._authHeaders },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
-  }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.detail || 'API Error') })),
+  }),
+
+  deleteAccount: (id) => apiFetch(`/accounts/${id}`, { method: 'DELETE' }),
 }

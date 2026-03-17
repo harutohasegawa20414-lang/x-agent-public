@@ -6,12 +6,10 @@
     "enabled": true,
     "conditions": {
       "profile_keywords": [
-        "起業",
         "社長"
       ],
       "post_keywords": [
-        "エンジニア",
-        "効率"
+        "エンジニア"
       ],
       "hashtags": [],
       "exclude_keywords": [],
@@ -19,7 +17,7 @@
       "follower_max": 1000000,
       "post_frequency_min": 0,
       "last_post_days_max": 0,
-      "engagement_threshold": 0.0,
+      "engagement_threshold": 0,
       "is_verified_only": false
     },
     "score_weights": {
@@ -36,7 +34,7 @@
     "auto_replenish": true,
     "replenish_threshold": 5,
     "created_at": "2026-03-15T18:47:31.535474",
-    "updated_at": "2026-03-15T18:47:31.535522",
+    "updated_at": "2026-03-18T00:50:57.153218",
     "stats": {
       "total_sent": 0,
       "total_replied": 0,

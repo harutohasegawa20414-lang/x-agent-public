@@ -41,10 +41,13 @@ function AccountSwitcher({ onEditRequest, onAddRequest }) {
 
   const load = async () => {
     try {
-      const [accs, cur] = await Promise.all([api.getAccounts(), api.getCurrentAccount()])
+      const accs = await api.getAccounts()
       setAccounts(accs)
+    } catch (e) { console.warn('[No9] getAccounts failed:', e.message) }
+    try {
+      const cur = await api.getCurrentAccount()
       setCurrent(cur)
-    } catch (e) { /* account_manager unavailable */ }
+    } catch (e) { /* currentAccount未設定は正常 */ }
   }
 
   useEffect(() => { load() }, [])

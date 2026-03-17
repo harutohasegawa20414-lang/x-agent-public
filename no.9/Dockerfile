@@ -17,7 +17,14 @@ COPY no.9/config/   ./config/
 COPY no.9/data/     ./data/
 COPY firebase_client.py .
 
+# 共有モジュール（account_manager等）とデータ
+COPY engine/        ./shared_engine/
+COPY config/        ./shared_config/
+COPY data/          ./shared_data/
+
 # Cloud Run はポート 8080 を使用
 ENV PORT=8080
+# 本番環境では Firebase（Firestore）を使用
+ENV USE_FIREBASE=true
 
 CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]

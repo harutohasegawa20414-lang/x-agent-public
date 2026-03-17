@@ -150,44 +150,17 @@ export const clearGeneratedPost = async (styleId) => {
     return res.json()
 }
 
-export const fetchSourceStatus = async () => {
-    const res = await apiFetch('/api/sources/status')
-    if (!res.ok) throw new Error('ソース情報の取得に失敗しました')
-    return res.json()
-}
-
-export const syncSources = async () => {
-    const res = await apiFetch('/api/sources/sync', { method: 'POST' })
-    if (!res.ok) {
-        const error = await res.json()
-        throw new Error(error.detail || '同期に失敗しました')
-    }
-    return res.json()
-}
-
-export const fetchDriveFiles = async () => {
-    const res = await apiFetch('/api/sources/drive/files')
-    if (!res.ok) throw new Error('Driveファイル一覧の取得に失敗しました')
-    return res.json()
-}
-
-export const fetchNotionEntries = async () => {
-    const res = await apiFetch('/api/sources/notion/entries')
-    if (!res.ok) throw new Error('Notionエントリ一覧の取得に失敗しました')
-    return res.json()
-}
-
 export const fetchSourceSelections = async () => {
     const res = await apiFetch('/api/sources/selections')
     if (!res.ok) throw new Error('選択状態の取得に失敗しました')
     return res.json()
 }
 
-export const saveSourceSelections = async (drive, notion, urls = []) => {
+export const saveSourceSelections = async (urls = []) => {
     const res = await apiFetch('/api/sources/selections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ drive, notion, urls }),
+        body: JSON.stringify({ urls }),
     })
     if (!res.ok) throw new Error('選択状態の保存に失敗しました')
     return res.json()

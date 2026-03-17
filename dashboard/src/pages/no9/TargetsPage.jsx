@@ -35,7 +35,7 @@ export default function TargetsPage() {
   const [searching, setSearching] = useState(false)
   const [showSearch, setShowSearch] = useState(false)
   const [filter, setFilter] = useState({ category_id: '', status: '' })
-  const [searchForm, setSearchForm] = useState({ keyword: '', category_id: '', max_results: 20, score_threshold: 0 })
+  const [searchForm, setSearchForm] = useState({ keyword: '', category_id: '', max_results: 20, score_threshold: 0, search_mode: 'profile' })
   const [searchResult, setSearchResult] = useState(null)
   const [msg, setMsg] = useState(null)
 
@@ -144,6 +144,24 @@ export default function TargetsPage() {
           <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 600, color: 'white' }}>
             キーワードでユーザーを検索 & スコアリング
           </h3>
+          {/* 検索モード切替 */}
+          <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)', width: 'fit-content' }}>
+            {[
+              { value: 'profile', label: 'プロフィール検索' },
+              { value: 'tweet', label: 'ツイート検索' },
+            ].map(({ value, label }) => (
+              <button key={value}
+                onClick={() => setSearchForm(f => ({ ...f, search_mode: value }))}
+                style={{
+                  padding: '7px 18px', fontSize: 12, fontWeight: 500, border: 'none', cursor: 'pointer',
+                  background: searchForm.search_mode === value ? 'rgba(79,142,247,0.2)' : 'transparent',
+                  color: searchForm.search_mode === value ? '#7db3fc' : '#7481a0',
+                  borderRight: value === 'profile' ? '1px solid rgba(255,255,255,0.08)' : 'none',
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
             <input value={searchForm.keyword} onChange={e => setSearchForm(f => ({ ...f, keyword: e.target.value }))}
               placeholder="キーワード（例: 経営者 起業）"
@@ -173,6 +191,13 @@ export default function TargetsPage() {
               marginTop: 12, padding: '10px 14px', borderRadius: 8, fontSize: 12,
               background: 'rgba(79,142,247,0.06)', border: '1px solid rgba(79,142,247,0.15)', color: '#94a3b8',
             }}>
+              <span style={{
+                display: 'inline-block', padding: '1px 7px', borderRadius: 4, fontSize: 10, marginRight: 8,
+                background: searchResult.search_mode_used === 'profile' ? 'rgba(79,142,247,0.15)' : 'rgba(251,191,36,0.15)',
+                color: searchResult.search_mode_used === 'profile' ? '#7db3fc' : '#fbbf24',
+              }}>
+                {searchResult.search_mode_used === 'profile' ? 'プロフィール検索' : 'ツイート検索'}
+              </span>
               検索 {searchResult.found}件 → スコア通過 {searchResult.scored}件 → 新規追加 <span style={{ color: '#7db3fc' }}>{searchResult.added}件</span>
             </div>
           )}

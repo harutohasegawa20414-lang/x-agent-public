@@ -12,6 +12,7 @@ token.json
 *.pfx
 service_account*.json
 firebase-service-account.json
+check_auth.py
 
 # Firebase キャッシュ・バックアップ
 .firebase/

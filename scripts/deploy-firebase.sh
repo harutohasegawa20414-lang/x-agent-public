@@ -58,41 +58,54 @@ npm install --silent
 VITE_API_KEY="$(grep '^VITE_API_KEY=' "$ROOT/.env" | cut -d'=' -f2-)" npm run build
 echo "✓ dashboard/dist/ ビルド完了"
 
-# Cloud Run に渡す環境変数を生成（ローカル専用変数・Viteビルド変数は除外）
-# 除外: FIREBASE_CREDENTIALS_JSON (Cloud RunではADCを使用), VITE_* (ビルド時変数)
-_cloud_env() {
-    grep -v '^#' "$ROOT/.env" \
-    | grep -v '^$' \
-    | grep -v '^FIREBASE_CREDENTIALS_JSON=' \
-    | grep -v '^VITE_' \
-    | tr '\n' ',' \
-    | sed 's/,$//'
-}
+# Cloud Run に渡す環境変数ファイルを生成（YAML形式）
+# --set-env-vars はカンマ区切りのためALLOWED_ORIGINSのカンマと衝突する
+# → --env-vars-file (YAML) を使用して安全に渡す
+_ENV_VARS_FILE="$ROOT/.cloud-env-vars.yaml"
+python3 -c "
+with open('$ROOT/.env') as f:
+    for line in f:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('FIREBASE_CREDENTIALS_JSON=') or line.startswith('VITE_'):
+            continue
+        key, _, value = line.partition('=')
+        # YAML値としてクォート
+        value = value.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"')
+        print(f'{key}: \"{value}\"')
+" > "$_ENV_VARS_FILE"
 
 # ── 3. X-Agent を Cloud Run にデプロイ ───────────────────
 echo "[3/5] X-Agent API を Cloud Run にデプロイ中..."
 cd "$ROOT"
 gcloud run deploy x-agent-api \
     --source . \
-    --dockerfile Dockerfile \
     --platform managed \
     --region "$REGION" \
     --project "$PROJECT_ID" \
     --allow-unauthenticated \
-    --set-env-vars "$(_cloud_env)"
+    --env-vars-file "$_ENV_VARS_FILE"
 echo "✓ X-Agent API デプロイ完了"
 
 # ── 4. No.9 を Cloud Run にデプロイ ─────────────────────
 echo "[4/5] No.9 API を Cloud Run にデプロイ中..."
+# No.9はno.9/Dockerfileを使うため、一時的にルートにコピーしてビルド
+cp "$ROOT/Dockerfile" "$ROOT/Dockerfile.xagent.bak"
+cp "$ROOT/no.9/Dockerfile" "$ROOT/Dockerfile"
 gcloud run deploy no9-api \
     --source . \
-    --dockerfile no.9/Dockerfile \
     --platform managed \
     --region "$REGION" \
     --project "$PROJECT_ID" \
     --allow-unauthenticated \
-    --set-env-vars "$(_cloud_env)"
+    --env-vars-file "$_ENV_VARS_FILE"
+# Dockerfileを元に戻す
+mv "$ROOT/Dockerfile.xagent.bak" "$ROOT/Dockerfile"
 echo "✓ No.9 API デプロイ完了"
+
+# 一時ファイル削除
+rm -f "$_ENV_VARS_FILE"
 
 # ── 5. Firebase Hosting にデプロイ ──────────────────────
 echo "[5/5] Firebase Hosting にデプロイ中..."

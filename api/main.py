@@ -37,7 +37,7 @@ from engine.post_generator import PostGenerator
 from engine.x_poster import XPoster
 from engine.history_manager import load_history, save_post, delete_post, update_post_status
 from engine import account_manager
-from engine.source_fetcher import SourceAggregator, GoogleDriveFetcher, NotionFetcher, load_selections, save_selections, parse_google_drive_url, parse_notion_url
+from engine.source_fetcher import SourceAggregator, load_selections, save_selections
 from engine.chat_agent import ChatAgent
 from engine.scheduler import scheduler_instance
 from engine.tweet_fetcher import fetch_recent_tweets, TweetFetchAuthError
@@ -223,12 +223,24 @@ async def add_custom_style(request: AddCustomStyleRequest):
 
 @app.delete("/api/styles/custom/{style_id}")
 async def delete_custom_style(style_id: str):
-    """カスタムスタイルを削除する（スケジュール・生成済み投稿も連動削除）"""
+    """スタイルを削除する（スケジュール・生成済み投稿も連動削除）"""
+    found = False
+
+    # custom_styles リストから削除
     styles = load_custom_styles()
     new_styles = [s for s in styles if s["id"] != style_id]
-    if len(new_styles) == len(styles):
-        raise HTTPException(status_code=404, detail="Custom style not found")
-    save_custom_styles(new_styles)
+    if len(new_styles) < len(styles):
+        save_custom_styles(new_styles)
+        found = True
+
+    # styles/ ディレクトリの JSON ファイルを削除
+    style_json = os.path.join(STYLES_DIR, f"{style_id}.json")
+    if os.path.exists(style_json):
+        os.remove(style_json)
+        found = True
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Style not found")
 
     # 対応するスケジューラージョブを削除
     config = scheduler_instance.load_config()
@@ -591,45 +603,18 @@ async def reset_chat_session():
         os.remove(CHAT_SESSION_PATH)
     return {"status": "reset"}
 
-# ─── 一次情報（Google Drive / Notion） ───────────────────────
-
-@app.get("/api/sources/status")
-async def get_source_status():
-    aggregator = SourceAggregator()
-    return aggregator.get_status()
-
-@app.post("/api/sources/sync")
-async def sync_sources():
-    aggregator = SourceAggregator()
-    try:
-        result = aggregator.refresh()
-        return {"status": "success", "data": result}
-    except Exception as e:
-        print(f"[sync_sources] エラー: {e}")
-        raise HTTPException(status_code=500, detail="Sync failed. Please try again later.")
-
-@app.get("/api/sources/drive/files")
-async def list_drive_files():
-    files = GoogleDriveFetcher().list_files()
-    return {"files": files}
-
-@app.get("/api/sources/notion/entries")
-async def list_notion_entries():
-    entries = NotionFetcher().list_entries()
-    return {"entries": entries}
+# ─── 一次情報（URL ソース） ────────────────────────────────────
 
 @app.get("/api/sources/selections")
 async def get_selections():
     return load_selections()
 
 class SelectionsRequest(BaseModel):
-    drive: List[str] = []
-    notion: List[str] = []
     urls: List[dict] = []
 
 @app.post("/api/sources/selections")
 async def update_selections(req: SelectionsRequest):
-    save_selections({"drive": req.drive, "notion": req.notion, "urls": req.urls})
+    save_selections({"urls": req.urls})
     return {"status": "ok"}
 
 class URLFetchRequest(BaseModel):
@@ -637,25 +622,43 @@ class URLFetchRequest(BaseModel):
 
 @app.post("/api/sources/url/fetch")
 async def fetch_url_source(req: URLFetchRequest):
+    import requests as _requests
+    from bs4 import BeautifulSoup
+
     url = req.url.strip()
-    if "drive.google.com" in url or "docs.google.com" in url:
-        file_id = parse_google_drive_url(url)
-        if not file_id:
-            raise HTTPException(400, "Google Drive URLからファイルIDを取得できませんでした")
-        result = GoogleDriveFetcher().fetch_file_by_id(file_id)
-        result["url"] = url
-        result["type"] = "gdrive"
-        return result
-    elif "notion.so" in url or "notion.site" in url:
-        page_id = parse_notion_url(url)
-        if not page_id:
-            raise HTTPException(400, "Notion URLからページIDを取得できませんでした")
-        result = NotionFetcher().fetch_page_by_id(page_id)
-        result["url"] = url
-        result["type"] = "notion"
-        return result
+    if not url:
+        raise HTTPException(400, "URLを入力してください")
+
+    try:
+        resp = _requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; XAgentBot/1.0)"},
+        )
+        resp.raise_for_status()
+        resp.encoding = resp.apparent_encoding or "utf-8"
+        html = resp.text
+    except Exception as e:
+        raise HTTPException(400, f"URLの取得に失敗しました: {e}")
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # title
+    title = ""
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()
+
+    # body text
+    article = soup.find("article")
+    container = article if article else soup.find("body")
+    if container:
+        for tag in container.find_all(["script", "style", "nav", "header", "footer"]):
+            tag.decompose()
+        text = container.get_text(separator="\n", strip=True)
     else:
-        raise HTTPException(400, "Google DriveまたはNotionのURLを入力してください")
+        text = soup.get_text(separator="\n", strip=True)
+
+    return {"status": "ok", "url": url, "title": title, "text": text, "type": "url"}
 
 # ─── スケジューラー ─────────────────────────────────────────
 

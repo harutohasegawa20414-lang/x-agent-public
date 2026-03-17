@@ -3,7 +3,11 @@ firebase_client.py
 
 Firebase Admin SDK 共有クライアント（X Agent + No.9 両システムで共有）。
 
-接続優先順位:
+環境変数 USE_FIREBASE で制御:
+  - USE_FIREBASE=true  → Firestore を使用（本番環境）
+  - USE_FIREBASE=false  → ローカルファイルのみ使用（ローカル開発環境、デフォルト）
+
+本番での接続優先順位:
   1. FIREBASE_CREDENTIALS_JSON 環境変数にパスが設定されている場合 → サービスアカウントJSONで認証
   2. パス未設定または該当ファイルが存在しない場合 → ADC（Application Default Credentials）で認証
      （Cloud Run / GCE 環境では自動的にメタデータサーバーを使用）
@@ -26,12 +30,21 @@ _db = None
 _initialized = False
 
 
+def _is_firebase_enabled() -> bool:
+    """USE_FIREBASE 環境変数で Firebase の使用可否を判定する。デフォルトは無効。"""
+    return os.getenv("USE_FIREBASE", "false").lower() in ("true", "1", "yes")
+
+
 def get_db():
-    """Firestoreクライアントを返す。未設定・未インストールの場合はNoneを返す。"""
+    """Firestoreクライアントを返す。未設定・未インストール・USE_FIREBASE=false の場合はNoneを返す。"""
     global _db, _initialized
     if _initialized:
         return _db
     _initialized = True
+
+    if not _is_firebase_enabled():
+        print("[Firebase] USE_FIREBASE=false のためスキップ（ローカルファイルを使用）")
+        return None
 
     if not FIREBASE_AVAILABLE:
         return None
@@ -40,10 +53,8 @@ def get_db():
         if not firebase_admin._apps:
             creds_path = os.getenv("FIREBASE_CREDENTIALS_JSON", "").strip()
             if creds_path and os.path.exists(creds_path):
-                # サービスアカウントJSONで認証（ローカル開発環境）
                 cred = credentials.Certificate(creds_path)
             else:
-                # ADCで認証（Cloud Run / GCP環境ではメタデータサーバーを自動使用）
                 if creds_path:
                     print(f"[Firebase] 認証ファイルが見つかりません: {creds_path} → ADCにフォールバック")
                 cred = credentials.ApplicationDefault()
