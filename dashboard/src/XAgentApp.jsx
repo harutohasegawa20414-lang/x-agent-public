@@ -7,9 +7,9 @@ import AccountModal from './components/AccountModal'
 import ChatPanel from './components/ChatPanel'
 import AddStyleModal from './components/AddStyleModal'
 import FrameworkExtractorPanel from './components/FrameworkExtractorPanel'
-import { fetchStyles, generatePost, postToX, fetchAccounts, fetchCurrentAccount, switchAccount, addAccount, editAccount, addCustomStyle, deleteCustomStyle, fetchGeneratedPosts, fetchFrameworks, saveFrameworks, deleteFramework, extractFrameworksByUsername, fetchSourceSelections } from './api'
+import { fetchStyles, generatePost, postToX, fetchAccounts, fetchCurrentAccount, switchAccount, addAccount, editAccount, deleteAccount, addCustomStyle, deleteCustomStyle, fetchGeneratedPosts, fetchFrameworks, saveFrameworks, deleteFramework, extractFrameworksByUsername, fetchSourceSelections } from './api'
 import SourceSelector from './components/SourceSelector'
-import { Link as LinkIcon, Cpu, ShieldCheck, Zap, History, Settings2, ChevronDown, Check, Plus, Edit2 } from 'lucide-react'
+import { Link as LinkIcon, Cpu, ShieldCheck, Zap, History, Settings2, ChevronDown, Check, Plus, Edit2, Trash2 } from 'lucide-react'
 
 const NAV = [
     { id: 'generate', label: '投稿生成', icon: Zap },
@@ -17,7 +17,7 @@ const NAV = [
     { id: 'history', label: '投稿履歴', icon: History },
 ]
 
-function SidebarAccountSwitcher({ currentAccount, accounts, onSwitch, onEdit, onAdd }) {
+function SidebarAccountSwitcher({ currentAccount, accounts, onSwitch, onEdit, onAdd, onDelete }) {
     const [open, setOpen] = useState(false)
     const ref = useRef(null)
 
@@ -164,7 +164,7 @@ function SidebarAccountSwitcher({ currentAccount, accounts, onSwitch, onEdit, on
                             <button
                                 onClick={() => { onEdit(acc); setOpen(false) }}
                                 style={{
-                                    padding: '8px 10px 8px 0', border: 'none',
+                                    padding: '8px 4px 8px 0', border: 'none',
                                     background: 'transparent', cursor: 'pointer',
                                     color: '#4f6080', fontFamily: 'inherit', display: 'flex', alignItems: 'center',
                                 }}
@@ -173,6 +173,19 @@ function SidebarAccountSwitcher({ currentAccount, accounts, onSwitch, onEdit, on
                                 title="アカウントを編集"
                             >
                                 <Edit2 size={12} />
+                            </button>
+                            <button
+                                onClick={() => { onDelete(acc.id, acc.name); setOpen(false) }}
+                                style={{
+                                    padding: '8px 10px 8px 4px', border: 'none',
+                                    background: 'transparent', cursor: 'pointer',
+                                    color: '#4f6080', fontFamily: 'inherit', display: 'flex', alignItems: 'center',
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.color = '#f87171'}
+                                onMouseLeave={e => e.currentTarget.style.color = '#4f6080'}
+                                title="アカウントを削除"
+                            >
+                                <Trash2 size={12} />
                             </button>
                         </div>
                     ))}
@@ -285,6 +298,23 @@ function XAgentApp() {
             setCurrentAccount(data.current)
         } catch (err) {
             alert(`アカウント切り替えに失敗しました: ${err.message}`)
+        }
+    }
+
+    const handleDeleteAccount = async (accountId, accountName) => {
+        if (!confirm(`アカウント「${accountName}」を削除しますか？\nこの操作は取り消せません。`)) return
+        try {
+            await deleteAccount(accountId)
+            const accountsData = await fetchAccounts()
+            setAccounts(accountsData)
+            try {
+                const currentData = await fetchCurrentAccount()
+                setCurrentAccount(currentData)
+            } catch (_) {
+                setCurrentAccount(null)
+            }
+        } catch (err) {
+            alert(`アカウントの削除に失敗しました: ${err.message}`)
         }
     }
 
@@ -426,6 +456,7 @@ function XAgentApp() {
                     onSwitch={handleSwitchAccount}
                     onEdit={(acc) => { setAccountToEdit(acc); setIsAccountModalOpen(true) }}
                     onAdd={() => { setAccountToEdit(null); setIsAccountModalOpen(true) }}
+                    onDelete={handleDeleteAccount}
                 />
 
                 {/* Nav */}

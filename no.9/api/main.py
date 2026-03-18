@@ -49,6 +49,8 @@ from engine import (
     analytics_manager,
     notification_sender,
     notion_fetcher,
+    bio_learner,
+    source_fetcher,
 )
 
 # X Agentのアカウントマネージャーをインポート
@@ -228,8 +230,8 @@ def _scheduled_auto_send():
                 templates = dm_generator.list_templates()
                 template = next((t for t in templates if t["id"] == cat["dm_template_id"]), None)
 
-            # DM生成
-            notion_context = notion_fetcher.get_context(settings.NOTION_API_TOKEN, settings.NOTION_DATABASE_ID)
+            # DM生成（URLソースから一次情報を取得）
+            url_context = source_fetcher.get_combined_text()
             dm_result = dm_generator.generate_dm(
                 target=target,
                 category=cat,
@@ -237,7 +239,7 @@ def _scheduled_auto_send():
                 tone=template.get("tone", "professional") if template else "professional",
                 openai_api_key=settings.OPENAI_API_KEY,
                 ab_test=False,
-                source_context=notion_context,
+                source_context=url_context,
             )
             dm_text = dm_result.get("text", "")
             if not dm_text:
@@ -363,14 +365,38 @@ def _scheduled_replenish():
         print(f"[WARN] Replenish job error: {e}")
 
 
+def _scheduled_bio_learn():
+    """毎朝9時にbio辞書の自動学習を実行する"""
+    try:
+        if not settings.OPENAI_API_KEY:
+            print("[WARN] OPENAI_API_KEY未設定。bio辞書学習をスキップ。")
+            return
+        result = bio_learner.run_learning(settings.OPENAI_API_KEY)
+        if result.get("success"):
+            # user_searcherのキャッシュもリフレッシュ
+            user_searcher.refresh_active_bio_categories()
+            print(f"[BIO-LEARN] 自動学習完了: {result['stats']}")
+        else:
+            print(f"[WARN] bio辞書学習失敗: {result.get('error')}")
+    except Exception as e:
+        print(f"[WARN] Scheduled bio-learn error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _scheduler
-    # 起動時にNotionの一次情報を取得・キャッシュ
-    if settings.NOTION_API_TOKEN and settings.NOTION_DATABASE_ID:
-        notion_fetcher.get_context(settings.NOTION_API_TOKEN, settings.NOTION_DATABASE_ID)
+    # 起動時にbio辞書をマージ
+    try:
+        bio_learner._refresh_merged_categories()
+    except Exception as e:
+        print(f"[WARN] bio辞書の初期マージ失敗: {e}")
+
+    # URLソースの状態確認
+    src_status = source_fetcher.get_status()
+    if src_status["url_count"] > 0:
+        print(f"[INFO] URLソース: {src_status['url_count']}件登録済み")
     else:
-        print("[WARN] Notion未設定。NOTION_API_TOKEN / NOTION_DATABASE_ID を .env に設定してください。")
+        print("[INFO] URLソース未登録。ダッシュボードからURLを追加してください。")
 
     if APSCHEDULER_AVAILABLE:
         _scheduler = BackgroundScheduler()
@@ -378,13 +404,11 @@ async def lifespan(app: FastAPI):
         _scheduler.add_job(_scheduled_auto_send, "interval", minutes=1, id="auto_send")
         _scheduler.add_job(_scheduled_replenish, "interval", minutes=10, id="replenish")
         _scheduler.add_job(
-            lambda: notion_fetcher.get_context(
-                settings.NOTION_API_TOKEN, settings.NOTION_DATABASE_ID, force_refresh=True
-            ),
-            "interval", hours=1, id="notion_refresh"
+            _scheduled_bio_learn, "cron",
+            hour=9, minute=0, timezone="Asia/Tokyo", id="bio_learn"
         )
         _scheduler.start()
-        print("[INFO] スケジューラー起動（返信ポーリング: 5分 / 自動送信チェック: 1分 / ターゲット補充: 10分 / Notion更新: 1時間）")
+        print("[INFO] スケジューラー起動（返信ポーリング: 5分 / 自動送信チェック: 1分 / ターゲット補充: 10分 / bio辞書学習: 毎朝9時）")
     else:
         print("[WARN] apscheduler未インストール。自動ポーリング・自動送信無効。")
     yield
@@ -1083,7 +1107,7 @@ def generate_dm(req: DMGenerateRequest):
         templates = dm_generator.list_templates()
         template = next((t for t in templates if t["id"] == req.template_id), None)
 
-    notion_context = notion_fetcher.get_context(settings.NOTION_API_TOKEN, settings.NOTION_DATABASE_ID)
+    url_context = source_fetcher.get_combined_text()
     result = dm_generator.generate_dm(
         target=target,
         category=category,
@@ -1091,7 +1115,7 @@ def generate_dm(req: DMGenerateRequest):
         tone=req.tone,
         openai_api_key=settings.OPENAI_API_KEY,
         ab_test=req.ab_test,
-        source_context=notion_context,
+        source_context=url_context,
     )
     return result
 
@@ -1376,6 +1400,74 @@ def get_time_distribution():
 @app.get("/analytics/keywords")
 def get_keyword_stats():
     return analytics_manager.get_keyword_stats()
+
+
+# ============================================================
+# 一次情報ソース（URL）API
+# ============================================================
+
+
+class URLFetchRequest(BaseModel):
+    url: str
+
+
+class SourceSelectionsRequest(BaseModel):
+    urls: List[Dict[str, Any]] = []
+
+
+@app.get("/sources/selections")
+def get_source_selections():
+    """保存済みURLソース選択を取得する"""
+    return source_fetcher.load_selections()
+
+
+@app.post("/sources/selections")
+def update_source_selections(req: SourceSelectionsRequest):
+    """URLソース選択を保存する"""
+    source_fetcher.save_selections({"urls": req.urls})
+    return {"status": "ok"}
+
+
+@app.post("/sources/url/fetch")
+def fetch_url_source(req: URLFetchRequest):
+    """URLからWebページの内容を取得する"""
+    result = source_fetcher.fetch_url_content(req.url)
+    if result["status"] != "ok":
+        raise HTTPException(status_code=400, detail=result.get("error", "取得に失敗しました"))
+    return result
+
+
+@app.get("/sources/status")
+def get_source_status():
+    """URLソースの状態を取得する"""
+    return source_fetcher.get_status()
+
+
+# ============================================================
+# Bio辞書学習 API
+# ============================================================
+
+@app.post("/bio-dictionary/learn")
+def trigger_bio_learn():
+    """bio辞書の学習を手動実行する"""
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEYが設定されていません")
+    result = bio_learner.run_learning(settings.OPENAI_API_KEY)
+    if result.get("success"):
+        user_searcher.refresh_active_bio_categories()
+    return result
+
+
+@app.get("/bio-dictionary/status")
+def get_bio_learn_status():
+    """bio辞書の学習状態を取得する"""
+    return bio_learner.get_learn_status()
+
+
+@app.get("/bio-dictionary/current")
+def get_bio_dictionary():
+    """現在のマージ済みbio辞書を取得する"""
+    return bio_learner.get_current_dictionary()
 
 
 # ============================================================

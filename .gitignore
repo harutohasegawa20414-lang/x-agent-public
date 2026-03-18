@@ -47,6 +47,11 @@ no.9/data/notion_cache.json
 no.9/data/poll_status.json
 no.9/data/current_account.json
 no.9/data/send_config.json
+no.9/data/bio_learned.json
+no.9/data/source_selections.json
+
+# バグレポート（内部脆弱性情報を含む）
+BUG_REPORT.md
 
 # ============================================================
 # Python

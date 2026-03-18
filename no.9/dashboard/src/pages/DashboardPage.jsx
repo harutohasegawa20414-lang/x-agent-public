@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Send, Reply, Users, TrendingUp, AlertTriangle, RefreshCw, Heart, ArrowUpRight, Zap, ZapOff } from 'lucide-react'
+import { Send, Reply, Users, TrendingUp, AlertTriangle, RefreshCw, Heart, ArrowUpRight, Zap, ZapOff, Link } from 'lucide-react'
 import { api } from '../hooks/useApi.js'
+import SourceSelector from '../components/SourceSelector.jsx'
 
 function KPICard({ label, value, sub, icon: Icon, color = '#4f8ef7', trend }) {
   return (
@@ -35,17 +36,21 @@ export default function DashboardPage() {
   const [health, setHealth] = useState(null)
   const [loading, setLoading] = useState(true)
   const [autoSend, setAutoSend] = useState({ enabled: false, pending: 0, waitSeconds: 0, canSendNow: true })
+  const [sourceStatus, setSourceStatus] = useState(null)
+  const [showSourceSelector, setShowSourceSelector] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [ov, he, as_] = await Promise.all([
+      const [ov, he, as_, ss] = await Promise.all([
         api.getOverview(),
         api.getHealthScore(),
         api.getAutoSendStatus(),
+        api.getSourceStatus(),
       ])
       setOverview(ov)
       setHealth(he)
+      setSourceStatus(ss)
       setAutoSend({
         enabled: as_.auto_send_enabled,
         pending: as_.pending_targets,
@@ -172,6 +177,51 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {/* ── URL Source ── */}
+      <div className="card" style={{ padding: '20px 28px', marginBottom: 24, display: 'flex', alignItems: 'center', gap: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Link size={14} style={{ color: '#60a5fa' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'white', whiteSpace: 'nowrap' }}>DM一次情報ソース</span>
+        </div>
+        <span style={{ fontSize: 12, color: '#94a3b8', flex: 1 }}>
+          {sourceStatus?.url_count > 0
+            ? `${sourceStatus.url_count} 件のURL登録済み`
+            : 'URLが未登録です'}
+        </span>
+        {sourceStatus?.urls?.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, overflow: 'hidden', flex: 1 }}>
+            {sourceStatus.urls.slice(0, 2).map((u, i) => (
+              <span key={i} style={{
+                fontSize: 11, color: '#7481a0',
+                padding: '2px 10px', borderRadius: 20,
+                background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.15)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180,
+              }}>
+                {u.title || u.url}
+              </span>
+            ))}
+            {sourceStatus.urls.length > 2 && (
+              <span style={{ fontSize: 11, color: '#4a5568' }}>+{sourceStatus.urls.length - 2}</span>
+            )}
+          </div>
+        )}
+        <button onClick={() => setShowSourceSelector(true)} style={{
+          padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+          border: 'none', color: 'white', whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 5,
+        }}>
+          <Link size={11} />URL管理
+        </button>
+      </div>
+
+      {showSourceSelector && (
+        <SourceSelector
+          onClose={() => setShowSourceSelector(false)}
+          onSaved={() => load()}
+        />
+      )}
 
       {/* ── Alert ── */}
       {overview?.pending_human > 0 && (

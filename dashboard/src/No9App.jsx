@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   LayoutDashboard, Tags, Users, MessageSquare,
-  BarChart2, Reply, Settings, ChevronDown, Check, Plus, Edit2
+  BarChart2, Reply, Settings, ChevronDown, Check, Plus, Edit2, Trash2
 } from 'lucide-react'
 import { api } from './hooks/useApi.js'
 import AccountModal from './components/AccountModal.jsx'
@@ -33,7 +33,7 @@ const PAGES = {
   settings: SettingsPage,
 }
 
-function AccountSwitcher({ onEditRequest, onAddRequest }) {
+function AccountSwitcher({ onEditRequest, onAddRequest, onDeleteRequest }) {
   const [accounts, setAccounts] = useState([])
   const [current, setCurrent] = useState(null)
   const [open, setOpen] = useState(false)
@@ -206,7 +206,7 @@ function AccountSwitcher({ onEditRequest, onAddRequest }) {
               <button
                 onClick={() => { onEditRequest(acc); setOpen(false) }}
                 style={{
-                  padding: '8px 10px 8px 0', border: 'none',
+                  padding: '8px 4px 8px 0', border: 'none',
                   background: 'transparent', cursor: 'pointer',
                   color: '#4f6080', fontFamily: 'inherit', display: 'flex', alignItems: 'center',
                 }}
@@ -215,6 +215,19 @@ function AccountSwitcher({ onEditRequest, onAddRequest }) {
                 title="アカウントを編集"
               >
                 <Edit2 size={12} />
+              </button>
+              <button
+                onClick={() => { onDeleteRequest(acc.id, acc.name); setOpen(false) }}
+                style={{
+                  padding: '8px 10px 8px 4px', border: 'none',
+                  background: 'transparent', cursor: 'pointer',
+                  color: '#4f6080', fontFamily: 'inherit', display: 'flex', alignItems: 'center',
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#f87171'}
+                onMouseLeave={e => e.currentTarget.style.color = '#4f6080'}
+                title="アカウントを削除"
+              >
+                <Trash2 size={12} />
               </button>
             </div>
           ))}
@@ -245,6 +258,16 @@ export default function No9App() {
   const [accountToEdit, setAccountToEdit] = useState(null)
   const switcherRef = useRef(null)
   const PageComponent = PAGES[page] || DashboardPage
+
+  const handleDeleteAccount = async (accountId, accountName) => {
+    if (!confirm(`アカウント「${accountName}」を削除しますか？\nこの操作は取り消せません。`)) return
+    try {
+      await api.deleteAccount(accountId)
+      if (AccountSwitcher._reload) AccountSwitcher._reload()
+    } catch (err) {
+      alert(`アカウントの削除に失敗しました: ${err.message}`)
+    }
+  }
 
   const handleAddOrEditAccount = async (config, isEdit) => {
     try {
@@ -299,6 +322,7 @@ export default function No9App() {
         <AccountSwitcher
           onEditRequest={(acc) => { setAccountToEdit(acc); setIsAccountModalOpen(true) }}
           onAddRequest={() => { setAccountToEdit(null); setIsAccountModalOpen(true) }}
+          onDeleteRequest={handleDeleteAccount}
         />
 
         {/* Nav */}

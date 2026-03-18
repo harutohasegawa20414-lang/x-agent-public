@@ -83,4 +83,10 @@ export const api = {
   getTemplateStats: () => apiFetch('/analytics/templates'),
   getTimeDistribution: () => apiFetch('/analytics/time-distribution'),
   getKeywordStats: () => apiFetch('/analytics/keywords'),
+
+  // 一次情報ソース（URL）
+  fetchUrlContent: (url) => apiFetch('/sources/url/fetch', { method: 'POST', body: JSON.stringify({ url }) }),
+  getSourceSelections: () => apiFetch('/sources/selections'),
+  saveSourceSelections: (urls) => apiFetch('/sources/selections', { method: 'POST', body: JSON.stringify({ urls }) }),
+  getSourceStatus: () => apiFetch('/sources/status'),
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { AlertTriangle, Play, StopCircle, Save, Heart, Clock, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Play, StopCircle, Save, Heart, Clock, RefreshCw, Link } from 'lucide-react'
 import { api } from '../hooks/useApi.js'
+import SourceSelector from '../components/SourceSelector.jsx'
 
 export default function SettingsPage() {
   const [config, setConfig] = useState(null)
@@ -9,13 +10,16 @@ export default function SettingsPage() {
   const [replenishStatus, setReplenishStatus] = useState(null)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [showSourceSelector, setShowSourceSelector] = useState(false)
+  const [sourceStatus, setSourceStatus] = useState(null)
 
   const load = async () => {
-    const [c, h, iv, rs] = await Promise.all([
+    const [c, h, iv, rs, ss] = await Promise.all([
       api.getSendConfig(), api.getHealthScore(),
       api.getSendIntervalStatus(), api.getReplenishStatus(),
+      api.getSourceStatus(),
     ])
-    setConfig(c); setHealth(h); setIntervalStatus(iv); setReplenishStatus(rs)
+    setConfig(c); setHealth(h); setIntervalStatus(iv); setReplenishStatus(rs); setSourceStatus(ss)
   }
   useEffect(() => { load() }, [])
 
@@ -140,6 +144,46 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+
+      {/* URL Source */}
+      <div className="card" style={{ padding: '22px 26px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <Link size={14} style={{ color: '#60a5fa' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>DM一次情報ソース</span>
+          <span style={{ fontSize: 11, color: '#4a5568', marginLeft: 4 }}>（URLからDM生成の文脈を取得）</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+            {sourceStatus?.url_count > 0
+              ? `${sourceStatus.url_count} 件のURLを登録済み`
+              : 'URLが未登録です。DM生成の精度を上げるためにURLを追加してください。'}
+          </span>
+          <button onClick={() => setShowSourceSelector(true)} style={{
+            padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+            border: 'none', color: 'white',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <Link size={12} />URL管理
+          </button>
+        </div>
+        {sourceStatus?.urls?.length > 0 && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {sourceStatus.urls.map((u, i) => (
+              <div key={i} style={{ fontSize: 11, color: '#7481a0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {u.title || u.url}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showSourceSelector && (
+        <SourceSelector
+          onClose={() => setShowSourceSelector(false)}
+          onSaved={() => { load(); setMsg('URLソースを更新しました'); setTimeout(() => setMsg(null), 3000) }}
+        />
+      )}
 
       {/* Replenish Status */}
       {replenishStatus && (

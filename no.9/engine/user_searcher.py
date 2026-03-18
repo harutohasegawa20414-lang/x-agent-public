@@ -250,6 +250,29 @@ _BIO_CATEGORIES = [
     },
 ]
 
+# マージ済み辞書（遅延初期化）
+_ACTIVE_BIO_CATEGORIES = None
+
+
+def _get_active_bio_categories():
+    """マージ済みbio辞書を返す。未初期化ならload→mergeする。"""
+    global _ACTIVE_BIO_CATEGORIES
+    if _ACTIVE_BIO_CATEGORIES is not None:
+        return _ACTIVE_BIO_CATEGORIES
+    try:
+        from engine.bio_learner import get_merged_categories
+        _ACTIVE_BIO_CATEGORIES = get_merged_categories()
+    except Exception as e:
+        print(f"[WARN] bio_learner読み込み失敗、ベースラインのみで動作: {e}")
+        _ACTIVE_BIO_CATEGORIES = _BIO_CATEGORIES
+    return _ACTIVE_BIO_CATEGORIES
+
+
+def refresh_active_bio_categories():
+    """外部からマージ済み辞書をリフレッシュする。"""
+    global _ACTIVE_BIO_CATEGORIES
+    _ACTIVE_BIO_CATEGORIES = None
+
 
 def _build_bio_matchers(search_terms: List[str]):
     """検索語から関連するbioパターンと同義語セットを構築する。"""
@@ -258,7 +281,7 @@ def _build_bio_matchers(search_terms: List[str]):
     matched_excludes = []
     terms_lower = {t.lower() for t in search_terms}
 
-    for cat in _BIO_CATEGORIES:
+    for cat in _get_active_bio_categories():
         # triggers のいずれかが検索語に含まれていれば発動
         if any(trigger in term or term in trigger for trigger in cat["triggers"] for term in terms_lower):
             matched_patterns.extend(cat.get("patterns", []))
