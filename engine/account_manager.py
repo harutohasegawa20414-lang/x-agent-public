@@ -155,10 +155,96 @@ def edit_account(account_id: str, name: str, x_api_key: str, x_api_secret: str,
     return False
 
 def delete_account(account_id: str) -> bool:
-    """アカウントを削除する（現在のアカウントは削除不可）"""
+    """アカウントを削除する。現在のアカウントの場合は別のアカウントに自動切り替え。
+    関連データ（スタイル、フレームワーク、投稿履歴、DM履歴等）もすべて削除する。"""
     data = load_data()
-    if data.get("current") == account_id:
-        return False  # 現在アクティブなアカウントは削除不可
+    # 対象アカウントが存在するか確認
+    if not any(a["id"] == account_id for a in data.get("accounts", [])):
+        return False
     data["accounts"] = [a for a in data["accounts"] if a["id"] != account_id]
+    # 削除したのが現在のアカウントなら別のアカウントに切り替え
+    if data.get("current") == account_id:
+        data["current"] = data["accounts"][0]["id"] if data["accounts"] else None
     save_data(data)
+
+    # 関連データをすべて削除
+    _cascade_delete_related_data()
     return True
+
+
+def _cascade_delete_related_data():
+    """アカウント削除時に関連データをすべてクリアする"""
+    # --- X-Agent 側 ---
+    try:
+        from engine.style_loader import save_custom_styles, STYLE_USERNAMES_PATH
+        save_custom_styles([])
+        # style_usernames もクリア
+        if _FIREBASE_IMPORTED:
+            save_doc("xagent_style_usernames", {})
+        if os.path.exists(STYLE_USERNAMES_PATH):
+            with open(STYLE_USERNAMES_PATH, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+    except Exception:
+        pass
+
+    try:
+        from engine.frameworks_manager import _save_all
+        _save_all({})
+    except Exception:
+        pass
+
+    try:
+        gp_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "data", "generated_posts.json")
+        if _FIREBASE_IMPORTED:
+            save_doc("xagent_generated_posts", {})
+        if os.path.exists(gp_path):
+            with open(gp_path, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+    except Exception:
+        pass
+
+    try:
+        from engine.history_manager import _FS_KEY as hist_key, HISTORY_PATH
+        if _FIREBASE_IMPORTED:
+            save_doc(hist_key, [])
+        if os.path.exists(HISTORY_PATH):
+            with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+                json.dump([], f)
+    except Exception:
+        pass
+
+    try:
+        sched_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  "data", "schedule_config.json")
+        empty_config = {"enabled": True, "jobs": []}
+        if _FIREBASE_IMPORTED:
+            save_doc("xagent_schedule_config", empty_config)
+        if os.path.exists(sched_path):
+            with open(sched_path, "w", encoding="utf-8") as f:
+                json.dump(empty_config, f)
+    except Exception:
+        pass
+
+    # --- No.9 側 ---
+    _no9_data = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "no.9", "data")
+
+    _no9_clear_targets = [
+        ("dm_history.json", "no9_dm_history", []),
+        ("replies.json", "no9_replies", []),
+        ("categories.json", "no9_categories", []),
+        ("targets.json", "no9_targets", []),
+        ("dm_templates.json", "no9_dm_templates", []),
+        ("poll_status.json", "no9_poll_status", {}),
+    ]
+    for filename, fs_key, empty_val in _no9_clear_targets:
+        try:
+            filepath = os.path.join(_no9_data, filename)
+            if _FIREBASE_IMPORTED:
+                save_doc(fs_key, empty_val)
+            if os.path.exists(filepath):
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(empty_val, f)
+        except Exception:
+            pass

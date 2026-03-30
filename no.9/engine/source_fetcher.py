@@ -45,6 +45,31 @@ def save_selections(selections: Dict):
 # URLスクレイピング
 # ============================================================
 
+def _validate_url_safety(url: str) -> str:
+    """SSRF防止: URLのスキーム・ホストを検証し、安全な場合のみURLを返す。"""
+    import ipaddress
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("http/httpsのURLのみ対応しています")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError("無効なURLです")
+    # localhost / プライベートIPをブロック
+    if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "[::]", "[::1]"):
+        raise ValueError("内部ネットワークのURLは指定できません")
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            raise ValueError("内部ネットワークのURLは指定できません")
+    except ValueError as ve:
+        if "内部ネットワーク" in str(ve):
+            raise
+        pass  # ホスト名の場合はスキップ
+    return url
+
+
 def fetch_url_content(url: str) -> Dict:
     """
     URLからWebページの内容を取得してタイトルとテキストを返す。
@@ -53,6 +78,12 @@ def fetch_url_content(url: str) -> Dict:
     url = url.strip()
     if not url:
         return {"status": "error", "error": "URLが空です"}
+
+    # SSRF防止
+    try:
+        _validate_url_safety(url)
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
 
     try:
         req = urllib.request.Request(
@@ -63,8 +94,8 @@ def fetch_url_content(url: str) -> Dict:
             # エンコーディング判定
             charset = resp.headers.get_content_charset() or "utf-8"
             html = resp.read().decode(charset, errors="replace")
-    except Exception as e:
-        return {"status": "error", "error": f"URLの取得に失敗しました: {e}"}
+    except Exception:
+        return {"status": "error", "error": "URLの取得に失敗しました"}
 
     # BeautifulSoupが使えるなら使う、なければ簡易パーサー
     try:

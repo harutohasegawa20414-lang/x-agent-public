@@ -12,10 +12,21 @@ from fastapi.responses import JSONResponse
 import json
 import asyncio
 import random
+import re
 import time
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from typing import List, Optional
+
+# セキュリティ: パストラバーサル防止用のID検証
+_SAFE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-]+$')
+
+def _validate_safe_id(value: str, field_name: str = "ID"):
+    """IDパラメータが安全な文字のみで構成されていることを検証する"""
+    if not value or not _SAFE_ID_PATTERN.match(value):
+        raise HTTPException(status_code=400, detail=f"無効な{field_name}です")
+    if len(value) > 128:
+        raise HTTPException(status_code=400, detail=f"{field_name}が長すぎます")
 
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -224,6 +235,7 @@ async def add_custom_style(request: AddCustomStyleRequest):
 @app.delete("/api/styles/custom/{style_id}")
 async def delete_custom_style(style_id: str):
     """スタイルを削除する（スケジュール・生成済み投稿も連動削除）"""
+    _validate_safe_id(style_id, "style_id")
     found = False
 
     # custom_styles リストから削除
@@ -255,6 +267,7 @@ async def delete_custom_style(style_id: str):
 @app.put("/api/styles/{style_id}/username")
 async def update_style_username(style_id: str, request: UpdateStyleUsernameRequest):
     """スタイルの x_username を data/style_usernames.json に保存する"""
+    _validate_safe_id(style_id, "style_id")
     save_style_username(style_id, request.x_username)
     return {"status": "saved", "style_id": style_id, "x_username": request.x_username.strip().lstrip("@")}
 
@@ -372,12 +385,14 @@ async def extract_frameworks_by_username(request: ExtractByUsernameRequest):
 @app.get("/api/frameworks/{style_id}")
 async def get_frameworks(style_id: str):
     """指定スタイルの保存済みフレームワーク一覧を返す"""
+    _validate_safe_id(style_id, "style_id")
     entry = load_frameworks(style_id)
     return entry
 
 @app.post("/api/frameworks/{style_id}/generate")
 async def generate_frameworks_endpoint(style_id: str):
     """X APIでツイートを取得し Gemini で10個のフレームワーク候補を返す（保存しない）"""
+    _validate_safe_id(style_id, "style_id")
     style = load_style(style_id)
     if not style:
         raise HTTPException(status_code=404, detail="Style not found")
@@ -419,6 +434,7 @@ async def generate_frameworks_endpoint(style_id: str):
 @app.post("/api/frameworks/{style_id}/save")
 async def save_frameworks_endpoint(style_id: str, request: SaveFrameworksRequest):
     """ユーザーが選択したフレームワークをDBに保存する"""
+    _validate_safe_id(style_id, "style_id")
     if not request.frameworks:
         raise HTTPException(status_code=400, detail="フレームワークを1つ以上選択してください")
     save_frameworks(style_id, request.style_name, request.frameworks)
@@ -427,6 +443,8 @@ async def save_frameworks_endpoint(style_id: str, request: SaveFrameworksRequest
 @app.delete("/api/frameworks/{style_id}/{fw_id}")
 async def remove_framework(style_id: str, fw_id: str):
     """特定フレームワークを削除する"""
+    _validate_safe_id(style_id, "style_id")
+    _validate_safe_id(fw_id, "fw_id")
     success = delete_fw(style_id, fw_id)
     if not success:
         raise HTTPException(status_code=404, detail="Framework not found")
@@ -490,6 +508,7 @@ async def get_history():
 
 @app.delete("/api/history/{post_id}")
 async def delete_history_entry(post_id: str):
+    _validate_safe_id(post_id, "post_id")
     success = delete_post(post_id)
     if not success:
         raise HTTPException(status_code=404, detail="Post not found")
@@ -533,6 +552,7 @@ async def add_account(request: AddAccountRequest):
 
 @app.put("/api/accounts/{account_id}")
 async def edit_account(account_id: str, request: EditAccountRequest):
+    _validate_safe_id(account_id, "account_id")
     success = account_manager.edit_account(
         account_id=account_id,
         name=request.name,
@@ -547,9 +567,10 @@ async def edit_account(account_id: str, request: EditAccountRequest):
 
 @app.delete("/api/accounts/{account_id}")
 async def remove_account(account_id: str):
+    _validate_safe_id(account_id, "account_id")
     success = account_manager.delete_account(account_id)
     if not success:
-        raise HTTPException(status_code=400, detail="Cannot delete current account or account not found")
+        raise HTTPException(status_code=404, detail="Account not found")
     return {"status": "deleted"}
 
 # ─── 生成済み投稿 ────────────────────────────────────────────
@@ -562,6 +583,7 @@ async def get_generated_posts():
 @app.delete("/api/generated/{style_id}")
 async def clear_generated_post(style_id: str):
     """特定スタイルの生成済み投稿を削除する"""
+    _validate_safe_id(style_id, "style_id")
     delete_generated_post(style_id)
     return {"status": "deleted"}
 
@@ -624,22 +646,49 @@ class URLFetchRequest(BaseModel):
 async def fetch_url_source(req: URLFetchRequest):
     import requests as _requests
     from bs4 import BeautifulSoup
+    from urllib.parse import urlparse
+    import ipaddress
 
     url = req.url.strip()
     if not url:
         raise HTTPException(400, "URLを入力してください")
+
+    # SSRF防止: URLスキーム・ホスト検証
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise HTTPException(400, "http/httpsのURLのみ対応しています")
+        hostname = parsed.hostname or ""
+        if not hostname:
+            raise HTTPException(400, "無効なURLです")
+        # localhost / プライベートIPをブロック
+        if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "[::]", "[::1]"):
+            raise HTTPException(400, "内部ネットワークのURLは指定できません")
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                raise HTTPException(400, "内部ネットワークのURLは指定できません")
+        except ValueError:
+            pass  # ホスト名の場合はスキップ
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "無効なURLです")
 
     try:
         resp = _requests.get(
             url,
             timeout=15,
             headers={"User-Agent": "Mozilla/5.0 (compatible; XAgentBot/1.0)"},
+            allow_redirects=False,
         )
         resp.raise_for_status()
         resp.encoding = resp.apparent_encoding or "utf-8"
         html = resp.text
-    except Exception as e:
-        raise HTTPException(400, f"URLの取得に失敗しました: {e}")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "URLの取得に失敗しました")
 
     soup = BeautifulSoup(html, "html.parser")
 
@@ -722,6 +771,7 @@ async def update_scheduler_config(request: SchedulerConfigRequest):
 
 @app.post("/api/scheduler/run-now/{job_id}")
 async def run_scheduler_job_now(job_id: str):
+    _validate_safe_id(job_id, "job_id")
     success = await scheduler_instance.run_now(job_id)
     if not success:
         raise HTTPException(status_code=404, detail="Job not found")

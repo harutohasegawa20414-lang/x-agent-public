@@ -139,8 +139,17 @@ def get_merged_categories() -> List[Dict]:
 # バリデーション
 # ============================================================
 
+_PATTERN_MAX_LENGTH = 200  # ReDoS防止: パターン長の上限
+_DANGEROUS_REGEX = re.compile(r'(\(.+\+\)\+|\(.+\*\)\*|\(.+\+\)\*|\(.+\*\)\+)')  # ネストした量指定子
+
+
 def _validate_pattern(pattern: str) -> bool:
-    """正規表現パターンの有効性をチェックする。"""
+    """正規表現パターンの有効性をチェックする（ReDoS防止付き）。"""
+    if not pattern or len(pattern) > _PATTERN_MAX_LENGTH:
+        return False
+    # ネストした量指定子（ReDoSの典型パターン）を拒否
+    if _DANGEROUS_REGEX.search(pattern):
+        return False
     try:
         re.compile(pattern)
         return True
